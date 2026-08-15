@@ -179,6 +179,7 @@ type McpSource = {
   table: Record<string, unknown>;
   headers?: Record<string, string>;
   plugin?: string;
+  pluginRoot?: string;
 };
 
 function mcpEntry(source: McpSource): McpEntry {
@@ -205,6 +206,7 @@ function mcpEntry(source: McpSource): McpEntry {
     ...(headers ? { headers } : {}),
     file: source.file,
     ...(source.plugin !== undefined ? { plugin: source.plugin } : {}),
+    ...(source.pluginRoot !== undefined ? { pluginRoot: source.pluginRoot } : {}),
     enabled: enabled ?? true,
     ...(enabled === undefined ? {} : { enabledSource: source.file })
   };
@@ -232,7 +234,8 @@ async function readHookFile(
   plugin: string | undefined,
   warn: Warn,
   /** True when a manifest named this file, so its absence is worth reporting. */
-  required = false
+  required = false,
+  pluginRoot?: string
 ): Promise<HookEntry[]> {
   const read = await readJsonChecked<HookFile>(file);
   if (read.missing) {
@@ -252,7 +255,7 @@ async function readHookFile(
     warn(file, 'no "hooks" object');
     return [];
   }
-  return hookEntries(events, file, scope, plugin, warn);
+  return hookEntries(events, file, scope, plugin, warn, pluginRoot);
 }
 
 function hookEntries(
@@ -260,7 +263,8 @@ function hookEntries(
   file: string,
   scope: Scope,
   plugin: string | undefined,
-  warn: Warn
+  warn: Warn,
+  pluginRoot?: string
 ): HookEntry[] {
   const entries: HookEntry[] = [];
   for (const [event, groups] of Object.entries(events)) {
@@ -298,6 +302,7 @@ function hookEntries(
           ...(timeout !== undefined ? { timeout } : {}),
           file,
           ...(plugin !== undefined ? { plugin } : {}),
+          ...(pluginRoot !== undefined ? { pluginRoot } : {}),
           enabled: true,
           index
         });
@@ -441,6 +446,8 @@ type PluginManifest = {
   skills?: unknown;
   hooks?: unknown;
   mcpServers?: unknown;
+  /** Path to a sibling `.app.json`; see {@link pluginApps}. */
+  apps?: unknown;
 };
 
 type MarketplaceFile = {
@@ -551,6 +558,7 @@ async function readPlugin(
   );
   const mcpServers = await pluginMcpServers(root, manifest, name, warn);
   const hooks = await pluginHooks(root, manifest, name, warn);
+  const otherContributions = await pluginApps(root, manifest, warn);
 
   collected.skills.push(...skills);
   collected.mcpServers.push(...mcpServers);
@@ -570,7 +578,8 @@ async function readPlugin(
     installed: true,
     skills: skills.length,
     hooks: hooks.length,
-    mcpServers: mcpServers.length
+    mcpServers: mcpServers.length,
+    ...(otherContributions > 0 ? { otherContributions } : {})
   };
 }
 
@@ -640,7 +649,8 @@ async function pluginMcpServers(
         name,
         file: resolved.file,
         table,
-        plugin
+        plugin,
+        pluginRoot: root
       })
     );
   }
@@ -662,7 +672,7 @@ async function pluginHooks(
   const inline = asTable(manifest.hooks);
   if (inline) {
     const events = asTable(inline['hooks']) ?? inline;
-    return hookEntries(events, manifestFile, 'plugin', plugin, warn);
+    return hookEntries(events, manifestFile, 'plugin', plugin, warn, root);
   }
   const declared = asString(manifest.hooks);
   const file = containedPath(root, declared ?? 'hooks.json');
@@ -670,7 +680,26 @@ async function pluginHooks(
     warn(manifestFile, `hooks path "${declared ?? ''}" points outside the plugin directory`);
     return [];
   }
-  return readHookFile(file, 'plugin', plugin, warn, declared !== undefined);
+  return readHookFile(file, 'plugin', plugin, warn, declared !== undefined, root);
+}
+
+/**
+ * `apps` points at a sibling `.app.json` that maps names to MCP server
+ * connections the client already knows how to launch — a compatibility
+ * mapping, not a server Yard itself probes. Yard does not give these their
+ * own inventory rows, but a manifest that only declares one is not empty.
+ */
+async function pluginApps(root: string, manifest: PluginManifest, warn: Warn): Promise<number> {
+  const resolved = await resolveManifestRef<{ apps?: unknown }>(root, manifest.apps, warn);
+  if (!resolved) {
+    return 0;
+  }
+  const apps = asTable(resolved.value['apps'] ?? resolved.value);
+  if (!apps) {
+    warn(resolved.file, 'no "apps" object');
+    return 0;
+  }
+  return Object.keys(apps).length;
 }
 
 type ManifestRef<T> = { file: string; value: T };

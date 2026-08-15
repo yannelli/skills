@@ -317,6 +317,12 @@ test('scanCodex reads a complete install', async () => {
     assert.equal(pluginMcp?.scope, 'plugin');
     assert.equal(pluginMcp?.plugin, 'github');
     assert.ok(pluginMcp?.file.endsWith('.mcp.json'));
+    // The probe needs this to resolve `cwd: "."` and any plugin-root variable
+    // against the plugin's own directory instead of Yard's process cwd.
+    assert.equal(
+      pluginMcp?.pluginRoot,
+      path.join(fixture.codex, 'plugins/cache/openai-curated/github/0.1.6')
+    );
 
     assert.deepEqual(
       scan.hooks.map((hook) => [hook.event, hook.index, hook.command]),
@@ -332,6 +338,10 @@ test('scanCodex reads a complete install', async () => {
     assert.equal(pluginHook?.scope, 'plugin');
     assert.equal(pluginHook?.plugin, 'github');
     assert.ok(pluginHook?.file.endsWith(path.join('.codex-plugin', 'plugin.json')));
+    assert.equal(
+      pluginHook?.pluginRoot,
+      path.join(fixture.codex, 'plugins/cache/openai-curated/github/0.1.6')
+    );
     const [first] = scan.hooks;
     assert.equal(first?.timeout, 10);
     assert.equal(first?.matcher, '');
@@ -370,6 +380,9 @@ test('scanCodex reads a complete install', async () => {
     assert.equal(github?.skills, 1);
     assert.equal(github?.mcpServers, 1);
     assert.equal(github?.hooks, 1);
+    // No "apps" field declared, so this must stay absent rather than 0 — the
+    // doctor's plugin-empty check treats presence, not value, as the signal.
+    assert.equal(github?.otherContributions, undefined);
     // The manifest lives one version directory below the plugin directory.
     assert.equal(github?.root, path.join(fixture.codex, 'plugins/cache/openai-curated/github/0.1.6'));
 
@@ -464,6 +477,56 @@ test('a malformed plugin manifest warns and the plugin still lists', async () =>
     assert.match(
       scan.warnings.find((item) => item.file === manifest)?.message ?? '',
       /could not parse JSON/
+    );
+  });
+});
+
+test('a plugin whose only contribution is an "apps" mapping reports it instead of reading as empty', async () => {
+  await withFixture(async (fixture) => {
+    await buildFixture(fixture);
+    const root = path.join(fixture.codex, 'plugins/cache/openai-curated/datadog/0.3.0');
+    await write(
+      path.join(root, '.codex-plugin', 'plugin.json'),
+      JSON.stringify({
+        name: 'datadog',
+        version: '0.3.0',
+        description: 'Monitor dashboards and incidents from Codex.',
+        apps: './.app.json'
+      })
+    );
+    await write(
+      path.join(root, '.app.json'),
+      JSON.stringify({ apps: { datadog: { id: 'asdk_app_69a1d78e929881919bba0dbda1f6436d' } } })
+    );
+
+    const scan = await scanCodex(fixture.project);
+
+    const datadog = scan.plugins.find((plugin) => plugin.name === 'datadog');
+    assert.equal(datadog?.installed, true);
+    assert.equal(datadog?.skills, 0);
+    assert.equal(datadog?.mcpServers, 0);
+    assert.equal(datadog?.hooks, 0);
+    assert.equal(datadog?.otherContributions, 1);
+  });
+});
+
+test('an "apps" reference outside the plugin directory warns instead of resolving', async () => {
+  await withFixture(async (fixture) => {
+    await buildFixture(fixture);
+    const root = path.join(fixture.codex, 'plugins/cache/openai-curated/rogue-app/1.0.0');
+    await write(
+      path.join(root, '.codex-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'rogue-app', apps: '/etc/shadow' })
+    );
+
+    const scan = await scanCodex(fixture.project);
+
+    const rogue = scan.plugins.find((plugin) => plugin.name === 'rogue-app');
+    assert.equal(rogue?.otherContributions, undefined);
+    assert.match(
+      scan.warnings.find((item) => item.file.endsWith(path.join('rogue-app/1.0.0/.codex-plugin/plugin.json')))
+        ?.message ?? '',
+      /points outside the plugin directory/
     );
   });
 });
@@ -579,7 +642,8 @@ test('a plugin manifest cannot point the scan outside the plugin directory', asy
         name: 'rogue',
         skills: ['../../../../../outside', './skills/'],
         mcpServers: '/etc/hosts',
-        hooks: '../../../../../../hooks.json'
+        hooks: '../../../../../../hooks.json',
+        apps: '/etc/shadow'
       })
     );
 
@@ -592,7 +656,7 @@ test('a plugin manifest cannot point the scan outside the plugin directory', asy
     const escapes = scan.warnings.filter((item) =>
       /points outside the plugin directory/.test(item.message)
     );
-    assert.equal(escapes.length, 3, JSON.stringify(scan.warnings, null, 2));
+    assert.equal(escapes.length, 4, JSON.stringify(scan.warnings, null, 2));
     assert.equal(
       escapes.every((item) => item.file === path.join(root, '.codex-plugin', 'plugin.json')),
       true
@@ -602,6 +666,7 @@ test('a plugin manifest cannot point the scan outside the plugin directory', asy
     assert.equal(rogue?.skills, 0);
     assert.equal(rogue?.mcpServers, 0);
     assert.equal(rogue?.hooks, 0);
+    assert.equal(rogue?.otherContributions, undefined);
   });
 });
 
