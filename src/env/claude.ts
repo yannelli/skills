@@ -279,6 +279,15 @@ export async function setSkillVisibility(opts: {
       `unknown skill visibility "${String(opts.visibility)}": expected one of ${SKILL_VISIBILITIES.join(', ')}`
     );
   }
+  // `<plugin>:<skill>` is how a plugin skill's qualified name always reads.
+  // Claude Code's own settings reference says skillOverrides "does not apply
+  // to plugin skills, which are managed through /plugin" — writing one here
+  // would report success while the client keeps ignoring the key.
+  if (opts.skill.includes(':')) {
+    throw new Error(
+      `"${opts.skill}" is a plugin skill; Claude Code does not apply skillOverrides to plugin skills — enable or disable its plugin instead`
+    );
+  }
   const file = claudeSettingsTarget(opts.scope ?? 'user', opts.projectRoot);
   const settings = await readSettingsForWrite(file);
   const overrides = { ...(asRecord(settings.skillOverrides) ?? {}) };
@@ -314,25 +323,91 @@ export async function setPluginEnabled(opts: {
   return writeSettings(file, settings, opts.dryRun === true);
 }
 
+/**
+ * `origin` is the *item's* scope from its `McpEntry`, not the settings layer
+ * to write — those are different axes, and conflating them is the reason
+ * plugin and user/local servers were being written to the wrong setting.
+ *
+ * A `.mcp.json` project server is switched on and off through the
+ * approve/reject lists in `enabledMcpjsonServers`/`disabledMcpjsonServers`,
+ * which is also how Claude Code decides whether an as-yet-unseen server is
+ * pending approval. Every other origin — a user/local server declared
+ * directly in `~/.claude.json`, or a plugin's own `.mcp.json` — has no such
+ * approval step; Claude Code's one lever for switching an already-loaded
+ * server off without touching the plugin itself is the general per-project
+ * `disabledMcpServers` array in `~/.claude.json`, keyed by the bare server
+ * name for a user/local server and `plugin:<plugin>:<server>` for a plugin's.
+ */
 export async function setMcpEnabled(opts: {
   server: string;
   enabled: boolean;
+  origin: Scope;
+  /** Required when `origin` is `'plugin'`. */
+  plugin?: string;
   scope?: ClaudeWriteScope;
   projectRoot: string;
   dryRun?: boolean;
 }): Promise<WriteResult> {
-  const file = claudeSettingsTarget(opts.scope ?? 'user', opts.projectRoot);
-  const settings = await readSettingsForWrite(file);
-  const enabled = new Set(asStringArray(settings.enabledMcpjsonServers) ?? []);
-  const disabled = new Set(asStringArray(settings.disabledMcpjsonServers) ?? []);
+  if (opts.origin === 'plugin' && !opts.plugin) {
+    throw new Error(`setMcpEnabled: "${opts.server}" has origin "plugin" but no owning plugin was given`);
+  }
 
-  enabled.delete(opts.server);
-  disabled.delete(opts.server);
-  (opts.enabled ? enabled : disabled).add(opts.server);
+  if (opts.origin === 'project') {
+    const file = claudeSettingsTarget(opts.scope ?? 'user', opts.projectRoot);
+    const settings = await readSettingsForWrite(file);
+    const enabled = new Set(asStringArray(settings.enabledMcpjsonServers) ?? []);
+    const disabled = new Set(asStringArray(settings.disabledMcpjsonServers) ?? []);
 
-  applyList(settings, 'enabledMcpjsonServers', enabled);
-  applyList(settings, 'disabledMcpjsonServers', disabled);
-  return writeSettings(file, settings, opts.dryRun === true);
+    enabled.delete(opts.server);
+    disabled.delete(opts.server);
+    (opts.enabled ? enabled : disabled).add(opts.server);
+
+    applyList(settings, 'enabledMcpjsonServers', enabled);
+    applyList(settings, 'disabledMcpjsonServers', disabled);
+    return writeSettings(file, settings, opts.dryRun === true);
+  }
+
+  const key = opts.origin === 'plugin' ? `plugin:${opts.plugin}:${opts.server}` : opts.server;
+  return setDisabledMcpServers(opts.projectRoot, key, !opts.enabled, opts.dryRun === true);
+}
+
+/**
+ * `~/.claude.json`'s `projects[<root>].disabledMcpServers` — the general
+ * per-project off-switch `applyMcpSwitch` already reads on the scan side.
+ * The file holds a great deal of other client state (trust answers, OAuth
+ * tokens, history) per project, so only that one array is touched, and a
+ * project Claude Code has never opened is created with nothing else in it
+ * rather than refused, since disabling ahead of first use is still a
+ * legitimate thing to ask for.
+ */
+async function setDisabledMcpServers(
+  projectRoot: string,
+  key: string,
+  disabled: boolean,
+  dryRun: boolean
+): Promise<WriteResult> {
+  const file = claudePaths(projectRoot).globalConfig;
+  const root = await readSettingsForWrite(file);
+  const projects = { ...(asRecord(root.projects) ?? {}) };
+  const projectKey = path.resolve(projectRoot);
+  const project = { ...(asRecord(projects[projectKey]) ?? {}) };
+  const list = new Set(asStringArray(project.disabledMcpServers) ?? []);
+
+  if (disabled) {
+    list.add(key);
+  } else {
+    list.delete(key);
+  }
+
+  if (list.size === 0) {
+    delete project.disabledMcpServers;
+  } else {
+    project.disabledMcpServers = [...list].sort();
+  }
+  projects[projectKey] = project;
+  root.projects = projects;
+
+  return writeSettings(file, root, dryRun);
 }
 
 /**
@@ -613,7 +688,7 @@ async function scanSkillDir(
 
     const { data } = parseFrontmatter(raw);
     const qualifiedName = opts.plugin ? `${opts.plugin}:${name}` : name;
-    const resolved = resolveVisibility(qualifiedName, name, opts, settings, skillDir);
+    const resolved = resolveVisibility(name, opts, settings, skillDir);
 
     entries.push({
       id: `claude:${opts.scope}:${qualifiedName}`,
@@ -635,7 +710,6 @@ async function scanSkillDir(
 }
 
 function resolveVisibility(
-  qualifiedName: string,
   name: string,
   opts: { scope: Scope; disabled?: boolean; disabledSource?: string; plugin?: string },
   settings: ClaudeSettingsView,
@@ -646,16 +720,17 @@ function resolveVisibility(
     // plugin's skill is off because a settings file said so.
     return { visibility: 'off', source: opts.disabledSource ?? path.dirname(skillDir) };
   }
-  // Plugin skills are keyed by `<plugin>:<skill>` and nothing else: a live
-  // install's settings.json disables them exactly that way, and matching on the
-  // bare name as well would let one plugin's skill inherit an override meant
-  // for a personal skill of the same name.
-  for (const key of opts.plugin ? [qualifiedName] : [name]) {
-    const override = settings.skillOverrides[key];
-    if (override) {
-      const source = settings.sources.skillOverrides[key];
-      return { visibility: override, ...(source ? { source } : {}) };
-    }
+  // Claude Code's own settings reference is explicit: skillOverrides "does not
+  // apply to plugin skills, which are managed through /plugin". A plugin skill
+  // is only ever fully on (the plugin is enabled, handled by `opts.disabled`
+  // above) or fully off — there is no partial visibility to look up.
+  if (opts.plugin) {
+    return { visibility: 'on' };
+  }
+  const override = settings.skillOverrides[name];
+  if (override) {
+    const source = settings.sources.skillOverrides[name];
+    return { visibility: override, ...(source ? { source } : {}) };
   }
   return { visibility: 'on' };
 }
@@ -1094,10 +1169,14 @@ async function scanPlugins(
         continue;
       }
       const scope = toScope(install.scope);
-      const root = typeof install.installPath === 'string' ? install.installPath : undefined;
+      const installPath = typeof install.installPath === 'string' ? install.installPath : undefined;
+      const root = installPath
+        ? await resolveNestedPluginRoot(installPath, name, marketplace, marketplaces, warnings)
+        : undefined;
       const manifest = root
         ? await readManifest(path.join(root, '.claude-plugin', 'plugin.json'), warnings)
         : undefined;
+      const otherContributions = root ? await pluginOtherContributions(root, manifest, warnings) : 0;
       const discovered = root
         ? await discoverPluginComponents(
             root,
@@ -1135,7 +1214,8 @@ async function scanPlugins(
         installed: root !== undefined && (await isDir(root)),
         skills: discovered.skills.length,
         hooks: discovered.hooks.length,
-        mcpServers: discovered.mcpServers.length
+        mcpServers: discovered.mcpServers.length,
+        ...(otherContributions > 0 ? { otherContributions } : {})
       });
     }
   }
@@ -1261,10 +1341,19 @@ function emptyComponents(): PluginComponents {
   return { skills: [], agents: [], commands: [], hooks: [], mcpServers: [] };
 }
 
+type ClaudePluginManifest = {
+  description?: string;
+  version?: string;
+  skills?: unknown;
+  lspServers?: unknown;
+  monitors?: unknown;
+  experimental?: unknown;
+};
+
 async function readManifest(
   file: string,
   warnings: ScanWarning[]
-): Promise<{ description?: string; version?: string; skills?: unknown } | undefined> {
+): Promise<ClaudePluginManifest | undefined> {
   const result = await readJsonFile(file);
   if (result.missing) {
     // Auto-discovery is legal: a plugin needs no manifest.
@@ -1283,8 +1372,163 @@ async function readManifest(
     ...(typeof record.version === 'string' ? { version: record.version } : {}),
     // A manifest may point `skills` at another directory or list explicit
     // skill paths. Kept unnarrowed; collectSkillDirs does the validation.
-    ...(record.skills !== undefined ? { skills: record.skills } : {})
+    ...(record.skills !== undefined ? { skills: record.skills } : {}),
+    ...(record.lspServers !== undefined ? { lspServers: record.lspServers } : {}),
+    ...(record.monitors !== undefined ? { monitors: record.monitors } : {}),
+    ...(record.experimental !== undefined ? { experimental: record.experimental } : {})
   };
+}
+
+/**
+ * A marketplace can list a plugin under a `git-subdir` source — a sparse
+ * clone of one subdirectory of a larger repository. `installed_plugins.json`
+ * then names the checkout root, not the plugin: the manifest, skills, and
+ * every other component sit under `<checkout>/<source.path>`. Every other
+ * source type (a relative path within the marketplace, `github`, `url`,
+ * `npm`, `archive`, `command`) has no such nesting, so the install path is
+ * already the plugin root and this is a no-op for them.
+ */
+async function resolveNestedPluginRoot(
+  installPath: string,
+  name: string,
+  marketplace: string | undefined,
+  marketplaces: Record<string, unknown>,
+  warnings: ScanWarning[]
+): Promise<string> {
+  if (!marketplace) {
+    return installPath;
+  }
+  const installLocation = asRecord(marketplaces[marketplace])?.installLocation;
+  if (typeof installLocation !== 'string') {
+    return installPath;
+  }
+  const manifestFile = path.join(installLocation, '.claude-plugin', 'marketplace.json');
+  const result = await readJsonFile(manifestFile);
+  if (result.missing || result.error !== undefined) {
+    // A remote or otherwise-unavailable marketplace checkout is normal —
+    // only the plugin's own cache needs to be readable, not the marketplace's.
+    return installPath;
+  }
+  const listed = asRecord(result.value)?.plugins;
+  if (!Array.isArray(listed)) {
+    return installPath;
+  }
+  const entry = listed.find((item) => asRecord(item)?.name === name);
+  const source = asRecord(asRecord(entry)?.source);
+  if (source?.source !== 'git-subdir' || typeof source.path !== 'string') {
+    return installPath;
+  }
+  const nested = path.resolve(installPath, source.path);
+  const rel = path.relative(installPath, nested);
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    warnings.push({
+      client: 'claude',
+      file: manifestFile,
+      message: `plugin "${name}" source.path "${source.path}" escapes the checkout — scanning ${installPath} instead`
+    });
+    return installPath;
+  }
+  return (await isDir(nested)) ? nested : installPath;
+}
+
+/**
+ * LSP servers and background monitors are real, loadable contributions that
+ * Yard does not turn into their own inventory rows — see
+ * {@link PluginEntry.otherContributions}. `monitors` is also accepted at the
+ * manifest's top level: Claude Code still loads it there for backward
+ * compatibility even though `claude plugin validate` now prefers
+ * `experimental.monitors`.
+ */
+async function pluginOtherContributions(
+  root: string,
+  manifest: ClaudePluginManifest | undefined,
+  warnings: ScanWarning[]
+): Promise<number> {
+  const manifestFile = path.join(root, '.claude-plugin', 'plugin.json');
+  let count = 0;
+
+  const lsp = await resolvePluginManifestValue(root, manifestFile, manifest?.lspServers, '.lsp.json', warnings);
+  const lspTable = asRecord(lsp);
+  if (lspTable) {
+    count += Object.keys(lspTable).length;
+  }
+
+  const experimental = asRecord(manifest?.experimental);
+  const monitorsRef = experimental?.monitors ?? manifest?.monitors;
+  const monitors = await resolvePluginManifestValue(
+    root,
+    manifestFile,
+    monitorsRef,
+    path.join('monitors', 'monitors.json'),
+    warnings
+  );
+  if (Array.isArray(monitors)) {
+    count += monitors.length;
+  }
+
+  return count;
+}
+
+/**
+ * The `lspServers`/`monitors` manifest fields follow the same shape as hooks
+ * and MCP servers: either the value inline, or a path (relative to the
+ * plugin root) to a file holding it. A default location is tried, silently,
+ * when the manifest says nothing at all — auto-discovery is legal.
+ */
+async function resolvePluginManifestValue(
+  root: string,
+  manifestFile: string,
+  ref: unknown,
+  defaultRelative: string,
+  warnings: ScanWarning[]
+): Promise<unknown | undefined> {
+  if (ref === undefined || ref === null) {
+    return readOptionalPluginJson(path.join(root, defaultRelative), warnings, false);
+  }
+  if (typeof ref === 'string') {
+    const file = containedPluginPath(root, ref);
+    if (file === undefined) {
+      warnings.push({ client: 'claude', file: manifestFile, message: `"${ref}" points outside the plugin directory` });
+      return undefined;
+    }
+    return readOptionalPluginJson(file, warnings, true);
+  }
+  // Already inline — an object for lspServers, an array for monitors.
+  return ref;
+}
+
+async function readOptionalPluginJson(
+  file: string,
+  warnings: ScanWarning[],
+  required: boolean
+): Promise<unknown | undefined> {
+  const result = await readJsonFile(file);
+  if (result.missing) {
+    if (required) {
+      warnings.push({ client: 'claude', file, message: 'referenced by the plugin manifest but missing' });
+    }
+    return undefined;
+  }
+  if (result.error !== undefined) {
+    warnings.push({ client: 'claude', file, message: result.error });
+    return undefined;
+  }
+  return result.value;
+}
+
+/**
+ * A plugin manifest is data Yard did not write, so a path inside it is
+ * untrusted: `"../../.."` must not turn a scan of one plugin into a walk of
+ * the developer's disk. Returns the resolved path only when it stays inside
+ * `root`.
+ */
+function containedPluginPath(root: string, relative: string): string | undefined {
+  const resolved = path.resolve(root, relative);
+  const rel = path.relative(root, resolved);
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    return undefined;
+  }
+  return resolved;
 }
 
 function splitPluginKey(key: string): { name: string; marketplace?: string } {
