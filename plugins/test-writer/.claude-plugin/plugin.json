@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "test-writer",
+  "displayName": "Test Writer",
+  "version": "0.1.0",
+  "description": "Subagent that writes focused tests for a changed behavior using the repo's existing test runner.",
+  "author": {
+    "name": "Ryan Yannelli",
+    "url": "https://github.com/yannelli"
+  },
+  "repository": "https://github.com/yannelli/skills",
+  "license": "MIT",
+  "keywords": ["testing", "subagent"]
+}

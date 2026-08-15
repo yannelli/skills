@@ -1,0 +1,4 @@
+{
+  "name": "Yannelli Skills Marketplace",
+  "install": "python3 -m pip install --user --quiet jsonschema && python3 scripts/validate-marketplace.py"
+}

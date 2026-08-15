@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "code-review",
+  "displayName": "Code Review",
+  "version": "0.1.0",
+  "description": "Subagent that reviews diffs for bugs, security issues, and project-convention drift.",
+  "author": {
+    "name": "Ryan Yannelli",
+    "url": "https://github.com/yannelli"
+  },
+  "repository": "https://github.com/yannelli/skills",
+  "license": "MIT",
+  "keywords": ["code-review", "subagent"]
+}

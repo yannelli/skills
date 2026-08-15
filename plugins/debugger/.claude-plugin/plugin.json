@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "debugger",
+  "displayName": "Debugger",
+  "version": "0.1.0",
+  "description": "Subagent that isolates a failing test or stack trace and reports a root cause with evidence.",
+  "author": {
+    "name": "Ryan Yannelli",
+    "url": "https://github.com/yannelli"
+  },
+  "repository": "https://github.com/yannelli/skills",
+  "license": "MIT",
+  "keywords": ["debugger", "subagent"]
+}
