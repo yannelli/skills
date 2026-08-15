@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { parseFrontmatter } from '../frontmatter.js';
 import { backupDir, cursorPaths } from './client-paths.js';
+import { collectSkillDirs } from './skill-dirs.js';
 import type { WriteResult } from './safe-io.js';
 import {
   isDir,
@@ -560,14 +561,20 @@ async function readSkillsDir(
   dir: string,
   scope: Scope,
   plugin: string | undefined,
-  warnings: ScanWarning[]
+  warnings: ScanWarning[],
+  skillDirs?: string[]
 ): Promise<SkillEntry[]> {
   const out: SkillEntry[] = [];
-  for (const name of await listDirs(dir)) {
-    const skillDir = path.join(dir, name);
+  // Plugins may declare nested or out-of-tree skill paths, in which case the
+  // caller resolves them and passes the directories in directly.
+  const dirs = skillDirs ?? (await listDirs(dir)).map((name) => path.join(dir, name));
+  for (const skillDir of dirs) {
+    const name = path.basename(skillDir);
     const file = path.join(skillDir, 'SKILL.md');
     if (!(await isFile(file))) {
-      warnings.push({ client: CLIENT, file, message: `skill directory ${name} has no SKILL.md` });
+      // Plugins routinely keep shared material (evals/, scripts/, assets/)
+      // alongside their skills. A directory without a SKILL.md is simply not a
+      // skill, not a fault worth reporting.
       continue;
     }
     const raw = await readText(file);
@@ -701,7 +708,8 @@ async function readPlugin(
   const manifestFile = path.join(root, '.cursor-plugin', 'plugin.json');
   const parsed = await readJsonChecked<unknown>(manifestFile);
   if (parsed.missing) {
-    scan.warnings.push({ client: CLIENT, file: manifestFile, message: 'plugin manifest missing' });
+    // The plugin cache also holds partial checkouts and staging directories.
+    // Cursor ignores anything without a manifest, so there is nothing to report.
     return;
   }
   if (parsed.error !== undefined) {
@@ -716,10 +724,13 @@ async function readPlugin(
 
   const name = typeof manifest.name === 'string' && manifest.name ? manifest.name : dirName;
 
-  const skills: SkillEntry[] = [];
-  for (const dir of manifestDirs(root, manifest.skills, 'skills', manifestFile, scan.warnings)) {
-    skills.push(...(await readSkillsDir(dir, 'plugin', name, scan.warnings)));
-  }
+  const skills = await readSkillsDir(
+    path.join(root, 'skills'),
+    'plugin',
+    name,
+    scan.warnings,
+    await collectSkillDirs(root, manifest.skills)
+  );
   const agents: AgentEntry[] = [];
   for (const dir of manifestDirs(root, manifest.agents, 'agents', manifestFile, scan.warnings)) {
     agents.push(...(await readMarkdownDir(dir, 'plugin', 'agent', name, scan.warnings)));

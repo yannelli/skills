@@ -2,6 +2,7 @@ import { mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter } from '../frontmatter.js';
 import { backupDir, claudePaths } from './client-paths.js';
+import { collectSkillDirs } from './skill-dirs.js';
 import {
   isDir,
   isFile,
@@ -533,14 +534,17 @@ function mergeSettings(
 
 async function scanSkillDir(
   dir: string,
-  opts: { scope: Scope; disabled?: boolean; plugin?: string },
+  opts: { scope: Scope; disabled?: boolean; plugin?: string; skillDirs?: string[] },
   settings: ClaudeSettingsView,
   warnings: ScanWarning[],
   seen?: Set<string>
 ): Promise<SkillEntry[]> {
   const entries: SkillEntry[] = [];
-  for (const name of await listDirs(dir)) {
-    const skillDir = path.join(dir, name);
+  // `dir` is the directory holding skills; `skillDirs` overrides that for
+  // plugins, whose manifests may declare nested or out-of-tree skill paths.
+  const skillDirs = opts.skillDirs ?? (await listDirs(dir)).map((name) => path.join(dir, name));
+  for (const skillDir of skillDirs) {
+    const name = path.basename(skillDir);
     const file = path.join(skillDir, 'SKILL.md');
     if (!(await isFile(file))) {
       continue;
@@ -967,7 +971,12 @@ async function scanPlugins(
       const discovered = root
         ? await discoverPluginComponents(
             root,
-            { plugin: name, enabled, ...(enabledSource ? { enabledSource } : {}) },
+            {
+              plugin: name,
+              enabled,
+              ...(enabledSource ? { enabledSource } : {}),
+              ...(manifest?.skills !== undefined ? { declaredSkills: manifest.skills } : {})
+            },
             settings,
             warnings
           )
@@ -1038,15 +1047,21 @@ async function scanPlugins(
 
 async function discoverPluginComponents(
   root: string,
-  owner: { plugin: string; enabled: boolean; enabledSource?: string },
+  owner: { plugin: string; enabled: boolean; enabledSource?: string; declaredSkills?: unknown },
   settings: ClaudeSettingsView,
   warnings: ScanWarning[]
 ): Promise<PluginComponents> {
   const { plugin, enabled } = owner;
   const components = emptyComponents();
 
+  const skillDirs = await collectSkillDirs(root, owner.declaredSkills);
   components.skills.push(
-    ...(await scanSkillDir(path.join(root, 'skills'), { scope: 'plugin', plugin }, settings, warnings))
+    ...(await scanSkillDir(
+      path.join(root, 'skills'),
+      { scope: 'plugin', plugin, skillDirs },
+      settings,
+      warnings
+    ))
   );
   components.agents.push(...(await scanDocDir(path.join(root, 'agents'), 'plugin', warnings, plugin)));
   components.commands.push(
@@ -1104,7 +1119,7 @@ function emptyComponents(): PluginComponents {
 async function readManifest(
   file: string,
   warnings: ScanWarning[]
-): Promise<{ description?: string; version?: string } | undefined> {
+): Promise<{ description?: string; version?: string; skills?: unknown } | undefined> {
   const result = await readJsonChecked<unknown>(file);
   if (result.missing) {
     // Auto-discovery is legal: a plugin needs no manifest.
@@ -1120,7 +1135,10 @@ async function readManifest(
   }
   return {
     ...(typeof record.description === 'string' ? { description: record.description } : {}),
-    ...(typeof record.version === 'string' ? { version: record.version } : {})
+    ...(typeof record.version === 'string' ? { version: record.version } : {}),
+    // A manifest may point `skills` at another directory or list explicit
+    // skill paths. Kept unnarrowed; collectSkillDirs does the validation.
+    ...(record.skills !== undefined ? { skills: record.skills } : {})
   };
 }
 

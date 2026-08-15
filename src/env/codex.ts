@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { parseFrontmatter } from '../frontmatter.js';
 import { codexPaths } from './client-paths.js';
+import { collectSkillDirs } from './skill-dirs.js';
 import { isDir, isFile, listDirs, readJsonChecked, readText } from './safe-io.js';
 import type {
   AgentEntry,
@@ -29,6 +30,8 @@ const CLIENT = 'codex' as const;
 /** Relative to a plugin root, not the repository root. */
 const PLUGIN_MANIFEST = path.join('.codex-plugin', 'plugin.json');
 const MARKETPLACE_MANIFEST = path.join('.agents', 'plugins', 'marketplace.json');
+/** Codex ships its own skills inside the user skills directory, one level down. */
+const SYSTEM_SKILLS = '.system';
 const DEFAULT_PLUGIN_SKILLS = './skills/';
 const CODEX_CLI_TIMEOUT_MS = 15_000;
 
@@ -65,6 +68,15 @@ export async function scanCodex(projectRoot: string): Promise<CodexScan> {
   skills.push(...(await readSkillTree(paths.userSkills, 'user', 'on', undefined, warn)));
   skills.push(
     ...(await readSkillTree(paths.userSkillsDisabled, 'user', 'off', paths.userSkillsDisabled, warn))
+  );
+  skills.push(
+    ...(await readSkillTree(
+      path.join(paths.userSkills, SYSTEM_SKILLS),
+      'builtin',
+      'on',
+      undefined,
+      warn
+    ))
   );
 
   const plugins = await scanPlugins(paths.pluginCacheDir, { skills, mcpServers, hooks }, warn);
@@ -214,7 +226,16 @@ async function readHookFile(
     warn(file, 'no "hooks" object');
     return [];
   }
+  return hookEntries(events, file, scope, plugin, warn);
+}
 
+function hookEntries(
+  events: Record<string, unknown>,
+  file: string,
+  scope: Scope,
+  plugin: string | undefined,
+  warn: Warn
+): HookEntry[] {
   const entries: HookEntry[] = [];
   for (const [event, groups] of Object.entries(events)) {
     if (!Array.isArray(groups)) {
@@ -274,11 +295,20 @@ async function readSkillTree(
   visibility: SkillEntry['visibility'],
   visibilitySource: string | undefined,
   warn: Warn,
-  plugin?: string
+  plugin?: string,
+  skillDirs?: string[]
 ): Promise<SkillEntry[]> {
   const entries: SkillEntry[] = [];
-  for (const name of await listDirs(root)) {
-    const entry = await readSkill(path.join(root, name), name, warn, {
+  // Plugins may declare nested or out-of-tree skill paths, in which case the
+  // caller resolves them and passes the directories in directly.
+  const dirs = skillDirs ?? (await listDirs(root)).map((name) => path.join(root, name));
+  for (const skillDir of dirs) {
+    const name = path.basename(skillDir);
+    // `.system` and friends hold Codex's own skills, scanned separately.
+    if (name.startsWith('.')) {
+      continue;
+    }
+    const entry = await readSkill(skillDir, name, warn, {
       scope,
       visibility,
       ...(visibilitySource !== undefined ? { visibilitySource } : {}),
@@ -417,12 +447,13 @@ async function readPlugin(
   const name = asString(manifest.name) ?? dirName;
 
   const skills = await readSkillTree(
-    path.resolve(root, asString(manifest.skills) ?? DEFAULT_PLUGIN_SKILLS),
+    path.resolve(root, DEFAULT_PLUGIN_SKILLS),
     'plugin',
     'on',
     undefined,
     warn,
-    name
+    name,
+    await collectSkillDirs(root, manifest.skills)
   );
   const mcpServers = await pluginMcpServers(root, manifest, name, warn);
   const hooks = await pluginHooks(root, manifest, name, warn);
@@ -491,8 +522,9 @@ async function pluginMcpServers(
 }
 
 /**
- * No plugin observed on disk ships hooks, so both spellings are accepted: a
- * `hooks` manifest reference, or a hooks.json at the plugin root.
+ * A plugin declares hooks either inline (the `superpowers` plugin does, though
+ * only ever as an empty object so far) or as a path, and Claude-style plugins
+ * drop a hooks.json at the root. All three are accepted.
  */
 async function pluginHooks(
   root: string,
@@ -500,13 +532,12 @@ async function pluginHooks(
   plugin: string,
   warn: Warn
 ): Promise<HookEntry[]> {
-  const ref = asString(manifest.hooks);
-  const file = path.resolve(root, ref ?? 'hooks.json');
-  if (isTable(manifest.hooks)) {
-    warn(path.join(root, PLUGIN_MANIFEST), 'inline "hooks" object is not supported; use a path');
-    return [];
+  const inline = asTable(manifest.hooks);
+  if (inline) {
+    const events = asTable(inline['hooks']) ?? inline;
+    return hookEntries(events, path.join(root, PLUGIN_MANIFEST), 'plugin', plugin, warn);
   }
-  return readHookFile(file, 'plugin', plugin, warn);
+  return readHookFile(path.resolve(root, asString(manifest.hooks) ?? 'hooks.json'), 'plugin', plugin, warn);
 }
 
 type ManifestRef<T> = { file: string; value: T };
