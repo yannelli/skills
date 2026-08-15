@@ -106,6 +106,7 @@ export async function buildContextReport(
   let probes: ProbeResult[] = [];
   if (options.probe && enabledServers.length) {
     probes = await probeAll(enabledServers, {
+      projectRoot: inventory.projectRoot,
       ...(options.probeTimeoutMs !== undefined ? { timeoutMs: options.probeTimeoutMs } : {})
     });
   }

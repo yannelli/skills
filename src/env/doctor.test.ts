@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { claudePaths, codexPaths } from './client-paths.js';
 import { diagnose, type Severity } from './doctor.js';
 import { emptyInventory } from './types.js';
 import type {
@@ -69,22 +70,37 @@ function projectMcp(spec: { name: string; enabled: boolean; enabledSource?: stri
   };
 }
 
-function hook(spec: { event: string; command: string; file: string; index?: number }): HookEntry {
+function hook(spec: {
+  event: string;
+  command: string;
+  file: string;
+  index?: number;
+  plugin?: string;
+  pluginRoot?: string;
+}): HookEntry {
   const index = spec.index ?? 0;
+  const scope: Scope = spec.plugin ? 'plugin' : 'user';
   return {
-    id: `claude:user:${spec.event}:${index}`,
+    id: `claude:${scope}:${spec.plugin ? `${spec.plugin}:` : ''}${spec.event}:${index}`,
     client: 'claude',
-    scope: 'user',
+    scope,
     event: spec.event,
     type: 'command',
     command: spec.command,
     file: spec.file,
+    ...(spec.plugin ? { plugin: spec.plugin } : {}),
+    ...(spec.pluginRoot ? { pluginRoot: spec.pluginRoot } : {}),
     enabled: true,
     index
   };
 }
 
-function plugin(spec: { name: string; enabled: boolean; installed: boolean }): PluginEntry {
+function plugin(spec: {
+  name: string;
+  enabled: boolean;
+  installed: boolean;
+  otherContributions?: number;
+}): PluginEntry {
   return {
     id: `claude:user:${spec.name}@market`,
     client: 'claude',
@@ -100,7 +116,8 @@ function plugin(spec: { name: string; enabled: boolean; installed: boolean }): P
     installed: spec.installed,
     skills: 0,
     hooks: 0,
-    mcpServers: 0
+    mcpServers: 0,
+    ...(spec.otherContributions !== undefined ? { otherContributions: spec.otherContributions } : {})
   };
 }
 
@@ -180,6 +197,90 @@ test('a hook that is a shell one-liner or has an unexpanded variable is not flag
 
     // Every one of those names a path that does not exist. None of them is a
     // path the doctor can resolve, so none of them is a finding.
+    assert.deepEqual(found, []);
+  });
+});
+
+async function withPluginHookTree(
+  run: (pluginRoot: string, hooksFile: string) => Promise<void>
+): Promise<void> {
+  const root = await mkdtemp(path.join(tmpdir(), 'yard-doctor-plugin-'));
+  try {
+    const pluginRoot = path.join(root, 'plugins', 'cache', 'market', 'demo');
+    await mkdir(path.join(pluginRoot, 'scripts'), { recursive: true });
+    await writeFile(path.join(pluginRoot, 'scripts', 'hello.sh'), '#!/bin/sh\necho hello\n', 'utf8');
+    await run(pluginRoot, path.join(pluginRoot, 'hooks', 'hooks.json'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test('a quoted plugin-root variable glued to an unquoted suffix resolves as one shell word', async () => {
+  await withPluginHookTree(async (pluginRoot, hooksFile) => {
+    const found = await diagnose(
+      inventoryWith({
+        hooks: [
+          hook({
+            event: 'SessionStart',
+            command: '"${CLAUDE_PLUGIN_ROOT}"/scripts/hello.sh',
+            file: hooksFile,
+            plugin: 'demo',
+            pluginRoot
+          })
+        ]
+      })
+    );
+
+    // The script is right there once the variable is expanded, so there is
+    // nothing to report — a naive tokenizer that split the quoted variable
+    // from the path suffix would test a nonexistent `/scripts/hello.sh` and
+    // report a false positive here.
+    assert.deepEqual(found, []);
+  });
+});
+
+test('a plugin hook script missing after variable expansion names the resolved path', async () => {
+  await withPluginHookTree(async (pluginRoot, hooksFile) => {
+    const found = await diagnose(
+      inventoryWith({
+        hooks: [
+          hook({
+            event: 'SessionStart',
+            command: 'node "${CLAUDE_PLUGIN_ROOT}"/scripts/missing.mjs',
+            file: hooksFile,
+            plugin: 'demo',
+            pluginRoot
+          })
+        ]
+      })
+    );
+
+    assert.equal(found.length, 1);
+    const missing = found[0];
+    assert.equal(missing?.code, 'hook-script-missing');
+    assert.equal(missing?.severity, 'error');
+    assert.ok(missing?.summary.includes(`${pluginRoot}/scripts/missing.mjs`));
+    assert.ok(missing?.remedy?.includes(path.join(pluginRoot, 'scripts', 'missing.mjs')));
+  });
+});
+
+test('a plugin hook without an explicit pluginRoot falls back to the hooks.json-relative heuristic', async () => {
+  await withPluginHookTree(async (pluginRoot, hooksFile) => {
+    const found = await diagnose(
+      inventoryWith({
+        hooks: [
+          // No `pluginRoot` set — this is what a scanner that has not been
+          // updated to populate the field yet still produces.
+          hook({
+            event: 'SessionStart',
+            command: '"${CLAUDE_PLUGIN_ROOT}"/scripts/hello.sh',
+            file: hooksFile,
+            plugin: 'demo'
+          })
+        ]
+      })
+    );
+
     assert.deepEqual(found, []);
   });
 });
@@ -333,6 +434,22 @@ test('a plugin whose only contribution is an agent is not reported as empty', as
   assert.equal(empty[0]?.remedy, 'yard plugin disable hollow@market');
 });
 
+test('a plugin whose only contribution is an app or LSP server is not reported as empty', async () => {
+  const found = await diagnose(
+    inventoryWith({
+      plugins: [
+        plugin({ name: 'app-only', enabled: true, installed: true, otherContributions: 1 }),
+        plugin({ name: 'hollow', enabled: true, installed: true })
+      ]
+    })
+  );
+
+  const empty = found.filter((entry) => entry.code === 'plugin-empty');
+  assert.equal(empty.length, 1);
+  assert.ok(empty[0]?.summary.includes('hollow@market'));
+  assert.ok(!empty.some((entry) => entry.summary.includes('app-only')));
+});
+
 test('scan warnings surface as unreadable-config with the file in the summary', async () => {
   const file = '/home/dev/.cursor/mcp.json';
   const found = await diagnose(
@@ -352,6 +469,73 @@ test('scan warnings surface as unreadable-config with the file in the summary', 
   assert.ok(entry?.summary.includes('invalid JSON'));
   assert.ok(entry?.remedy);
 });
+
+test('broken links under a disabled-skill parking directory are one info finding, not one per link', async () => {
+  const previousHome = process.env.YARD_HOME;
+  const home = await mkdtemp(path.join(tmpdir(), 'yard-doctor-home-'));
+  process.env.YARD_HOME = home;
+  try {
+    const disabledDir = codexPaths(PROJECT).userSkillsDisabled;
+    const brokenLinks = Array.from({ length: 31 }, (_, index) =>
+      warning('codex', path.join(disabledDir, `firecrawl-${index}`), 'skill symlink does not resolve to a directory')
+    );
+    const activeWarning = warning('codex', `${PROJECT}/.codex/config.toml`, 'could not parse TOML: line 3');
+
+    const found = await diagnose(
+      inventoryWith({ clients: ['codex'], warnings: [...brokenLinks, activeWarning] })
+    );
+
+    const aggregated = found.filter((entry) => entry.code === 'disabled-dir-noise');
+    assert.equal(aggregated.length, 1);
+    assert.equal(aggregated[0]?.severity, 'info');
+    assert.equal(aggregated[0]?.client, 'codex');
+    assert.equal(aggregated[0]?.file, disabledDir);
+    assert.ok(aggregated[0]?.summary.includes('31 stale entries'));
+    assert.ok(aggregated[0]?.summary.includes(disabledDir));
+
+    // The unrelated warning is untouched, and is not swallowed by the rollup.
+    const unrelated = found.filter((entry) => entry.code === 'unreadable-config');
+    assert.equal(unrelated.length, 1);
+    assert.equal(unrelated[0]?.file, `${PROJECT}/.codex/config.toml`);
+
+    // No per-link warning leaked through.
+    assert.ok(!found.some((entry) => entry.file?.includes('firecrawl-')));
+  } finally {
+    restoreEnv('YARD_HOME', previousHome);
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('a single broken link under a disabled-skill directory is still singular', async () => {
+  const previousHome = process.env.YARD_HOME;
+  const home = await mkdtemp(path.join(tmpdir(), 'yard-doctor-home-'));
+  process.env.YARD_HOME = home;
+  try {
+    const disabledDir = claudePaths(PROJECT).userSkillsDisabled;
+    const found = await diagnose(
+      inventoryWith({
+        warnings: [warning('claude', path.join(disabledDir, 'old-skill'), 'broken symlink; nothing is loaded from it')]
+      })
+    );
+
+    const aggregated = found.filter((entry) => entry.code === 'disabled-dir-noise');
+    assert.equal(aggregated.length, 1);
+    assert.equal(aggregated[0]?.client, 'claude');
+    assert.ok(aggregated[0]?.summary.includes('1 stale entry '));
+    assert.ok(!aggregated[0]?.summary.includes('1 stale entries'));
+  } finally {
+    restoreEnv('YARD_HOME', previousHome);
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
 
 test('results are sorted errors first', async () => {
   await withHookTree(async (_root, settings) => {

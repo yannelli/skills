@@ -48,6 +48,7 @@ export type PluginEntry = {
   skills: number;
   hooks: number;
   mcpServers: number;
+  otherContributions?: number;
 };
 
 export type McpTransportKind = 'stdio' | 'http' | 'sse' | 'ws';
@@ -66,6 +67,7 @@ export type McpEntry = {
   headers?: Record<string, string>;
   file: string;
   plugin?: string;
+  pluginRoot?: string;
   enabled: boolean;
   enabledSource?: string;
 };
@@ -81,6 +83,7 @@ export type HookEntry = {
   timeout?: number;
   file: string;
   plugin?: string;
+  pluginRoot?: string;
   enabled: boolean;
   enabledSource?: string;
   index: number;

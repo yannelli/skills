@@ -63,6 +63,15 @@ export type PluginEntry = {
   skills: number;
   hooks: number;
   mcpServers: number;
+  /**
+   * Contributions the manifest declares that are real but that Yard does not
+   * turn into their own inventory rows — Codex `apps`, Claude `lspServers` and
+   * `experimental.monitors`, and the like. Counted separately from `skills` /
+   * `hooks` / `mcpServers` rather than folded into them, so a plugin that ships
+   * only one of these still reads as contributing something instead of as
+   * `plugin-empty`.
+   */
+  otherContributions?: number;
 };
 
 export type McpTransportKind = 'stdio' | 'http' | 'sse' | 'ws';
@@ -82,6 +91,13 @@ export type McpEntry = {
   /** Absolute path to the file that declares it. */
   file: string;
   plugin?: string;
+  /**
+   * Absolute path to the owning plugin's root, when `plugin` is set. A
+   * plugin's `command`/`cwd` are commonly relative or use
+   * `${CLAUDE_PLUGIN_ROOT}`-style variables that only resolve against this
+   * directory, not against wherever Yard happens to be running from.
+   */
+  pluginRoot?: string;
   enabled: boolean;
   enabledSource?: string;
 };
@@ -99,6 +115,12 @@ export type HookEntry = {
   /** Absolute path to the file that declares it. */
   file: string;
   plugin?: string;
+  /**
+   * Absolute path to the owning plugin's root, when `plugin` is set. `command`
+   * routinely reads `"${CLAUDE_PLUGIN_ROOT}"/scripts/...` or a bare relative
+   * path that is only meaningful relative to this directory.
+   */
+  pluginRoot?: string;
   enabled: boolean;
   enabledSource?: string;
   /**

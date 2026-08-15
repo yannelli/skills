@@ -1,7 +1,9 @@
 import path from 'node:path';
+import { claudePaths, codexPaths } from './client-paths.js';
 import { exists } from './safe-io.js';
 import { probeAll } from './probe.js';
 import { duplicateSkills } from './inventory.js';
+import { expandVariables, isFullyExpanded, pathVariables, splitShellWords } from './shell-words.js';
 import type { Client, Inventory } from './types.js';
 
 /**
@@ -42,17 +44,7 @@ const DESCRIPTION_BUDGET = 1024;
 export async function diagnose(inventory: Inventory, options: DoctorOptions = {}): Promise<Diagnosis[]> {
   const found: Diagnosis[] = [];
 
-  for (const warning of inventory.warnings) {
-    found.push({
-      severity: 'warning',
-      client: warning.client,
-      code: 'unreadable-config',
-      summary: warning.file ? `${warning.file}: ${warning.message}` : warning.message,
-      ...(warning.file ? { file: warning.file } : {}),
-      remedy: 'Fix or remove the file — the client silently ignores what it cannot parse'
-    });
-  }
-
+  found.push(...warningDiagnoses(inventory));
   found.push(...(await checkHooks(inventory)));
   found.push(...checkSkills(inventory));
   found.push(...checkPlugins(inventory));
@@ -83,13 +75,18 @@ async function checkHooks(inventory: Inventory): Promise<Diagnosis[]> {
     if (hook.type !== 'command') {
       continue;
     }
-    const script = scriptPathFrom(hook.command);
+    // Prefer the root the scanner actually resolved the plugin against; fall
+    // back to the hooks.json-relative heuristic only for entries that predate
+    // that field (a client scanner Yard has not updated yet, or a fixture).
+    const pluginRoot = hook.plugin ? hook.pluginRoot ?? pluginRootOf(hook.file) : undefined;
+    const vars = pathVariables({ ...(pluginRoot ? { pluginRoot } : {}), projectRoot: inventory.projectRoot });
+    const script = scriptPathFrom(hook.command, vars);
     if (!script) {
       continue;
     }
     // Relative commands resolve against the file that declared them, except in
     // a plugin, where they resolve against the plugin root.
-    const base = hook.plugin ? pluginRootOf(hook.file) : path.dirname(hook.file);
+    const base = pluginRoot ?? path.dirname(hook.file);
     const resolved = path.isAbsolute(script) ? script : path.resolve(base, script);
     if (await exists(resolved)) {
       continue;
@@ -104,6 +101,81 @@ async function checkHooks(inventory: Inventory): Promise<Diagnosis[]> {
     });
   }
   return found;
+}
+
+/**
+ * Directories Yard itself parks a disabled personal skill in. Neither client
+ * scans them — Claude Code only reads `skills/`, Codex only reads `skills/`
+ * — so a broken symlink sitting in one is stale housekeeping, not something
+ * an active client trips over. One bad marketplace sync can leave dozens of
+ * dead links behind, and reporting each as its own warning buries the
+ * findings that describe something actually loaded and broken.
+ */
+function disabledSkillDirs(projectRoot: string): Array<{ client: Client; dir: string }> {
+  return [
+    { client: 'claude', dir: claudePaths(projectRoot).userSkillsDisabled },
+    { client: 'codex', dir: codexPaths(projectRoot).userSkillsDisabled }
+  ];
+}
+
+/**
+ * Every scan warning becomes a finding, except the ones from a disabled-skill
+ * parking directory, which are rolled up into one `info` finding per
+ * directory instead of one `warning` per stale link.
+ */
+function warningDiagnoses(inventory: Inventory): Diagnosis[] {
+  const found: Diagnosis[] = [];
+  const disabledDirs = disabledSkillDirs(inventory.projectRoot);
+  const parked = new Map<string, { client: Client; dir: string; count: number }>();
+
+  for (const warning of inventory.warnings) {
+    const parking = disabledDirs.find(
+      (candidate) => warning.file === candidate.dir || warning.file.startsWith(candidate.dir + path.sep)
+    );
+    if (parking) {
+      const entry = parked.get(parking.dir) ?? { client: parking.client, dir: parking.dir, count: 0 };
+      entry.count += 1;
+      parked.set(parking.dir, entry);
+      continue;
+    }
+    found.push({
+      severity: 'warning',
+      client: warning.client,
+      code: 'unreadable-config',
+      summary: warning.file ? `${warning.file}: ${warning.message}` : warning.message,
+      ...(warning.file ? { file: warning.file } : {}),
+      remedy: 'Fix or remove the file — the client silently ignores what it cannot parse'
+    });
+  }
+
+  for (const { client, dir, count } of parked.values()) {
+    const plural = count === 1 ? 'entry' : 'entries';
+    found.push({
+      severity: 'info',
+      client,
+      code: 'disabled-dir-noise',
+      summary: `${count} stale ${plural} under ${dir}; ${clientName(client)} does not scan its own disabled-skill directory, so none of this affects an active session`,
+      file: dir,
+      remedy: `Clean up ${dir} whenever convenient: remove the broken links, or restore what they point to`
+    });
+  }
+
+  return found;
+}
+
+function clientName(client: Client): string {
+  switch (client) {
+    case 'claude':
+      return 'Claude Code';
+    case 'codex':
+      return 'Codex';
+    case 'cursor':
+      return 'Cursor';
+    default: {
+      const exhaustive: never = client;
+      throw new Error(`unknown client: ${String(exhaustive)}`);
+    }
+  }
 }
 
 function checkSkills(inventory: Inventory): Diagnosis[] {
@@ -179,7 +251,9 @@ function checkPlugins(inventory: Inventory): Diagnosis[] {
         remedy: `Install it, or remove it from ${plugin.enabledSource ?? 'settings'}`
       });
     }
-    if (plugin.enabled && plugin.installed && !contributions.get(`${plugin.client}:${plugin.name}`)) {
+    const counted = contributions.get(`${plugin.client}:${plugin.name}`) ?? 0;
+    const total = counted + (plugin.otherContributions ?? 0);
+    if (plugin.enabled && plugin.installed && total === 0) {
       found.push({
         severity: 'info',
         client: plugin.client,
@@ -217,6 +291,7 @@ async function checkMcpReachable(inventory: Inventory, options: DoctorOptions): 
     return [];
   }
   const results = await probeAll(enabled, {
+    projectRoot: inventory.projectRoot,
     ...(options.probeTimeoutMs !== undefined ? { timeoutMs: options.probeTimeoutMs } : {})
   });
   return results
@@ -237,22 +312,27 @@ async function checkMcpReachable(inventory: Inventory, options: DoctorOptions): 
 /**
  * Pull the script out of a hook command so it can be checked for existence.
  * Returns undefined for anything that is a shell one-liner rather than a call
- * to a file, since those cannot be verified without executing them.
+ * to a file, since those cannot be verified without executing them, and for a
+ * path that still has a variable `vars` cannot resolve.
+ *
+ * Tokenizing with {@link splitShellWords} before expanding is what handles
+ * `"${CLAUDE_PLUGIN_ROOT}"/scripts/hello.sh`: a naive `match(/"[^"]*"|\S+/g)`
+ * treats the quoted variable and the unquoted suffix as two separate tokens
+ * and neither one is a real path on its own.
  */
-function scriptPathFrom(command: string): string | undefined {
+function scriptPathFrom(command: string, vars: Record<string, string>): string | undefined {
   const trimmed = command.trim();
   // Anything with shell control flow is a script in its own right, not a path.
   if (/[;&|<>]|\$\(|\bif\b|\bfor\b|\bwhile\b/.test(trimmed)) {
     return undefined;
   }
-  const tokens = trimmed.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
-  const candidates = tokens
-    .map((token) => token.replace(/^["']|["']$/g, ''))
+  const tokens = splitShellWords(trimmed)
+    .map((token) => expandVariables(token, vars))
     .filter((token) => !token.startsWith('-'));
   // `node ./hooks/x.mjs` — the path is the first token that looks like one.
-  const script = candidates.find((token) => /[/\\]/.test(token) && /\.[a-z0-9]+$/i.test(token));
-  if (!script || script.includes('${') || script.includes('$')) {
-    // Unexpanded variables make the path unknowable from here.
+  const script = tokens.find((token) => /[/\\]/.test(token) && /\.[a-z0-9]+$/i.test(token));
+  if (!script || !isFullyExpanded(script)) {
+    // A variable `vars` does not have makes the path unknowable from here.
     return undefined;
   }
   return script;
