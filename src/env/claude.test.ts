@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { isDir, readJson } from './safe-io.js';
+import { isDir, isFile, readJson } from './safe-io.js';
 import {
   CLAUDE_HOOK_EVENTS,
   claudeSettingsFiles,
@@ -616,6 +616,397 @@ test('setSkillDirectoryEnabled refuses plugin, project, and unknown skills', asy
       setSkillDirectoryEnabled({ skill: '../escape', enabled: false, projectRoot: fixture.project }),
       /not a plain skill directory name/
     );
+  });
+});
+
+test('symlinked skills, agents and rules are part of the inventory', async () => {
+  await withFixture(async (fixture) => {
+    // Linking a skill checked out elsewhere into ~/.claude/skills is a normal
+    // setup: on the machine this was written against every personal skill is
+    // a link, so a scan that trusts the dirent alone reports none of them.
+    const store = path.join(fixture.home, 'store');
+    await write(path.join(store, 'linked', 'SKILL.md'), skill('linked', 'Lives elsewhere.'));
+    await write(path.join(store, 'agents', 'linked-agent.md'), skill('linked-agent', 'Helps.'));
+    await write(path.join(store, 'rules', 'house.md'), '# house rules\n');
+
+    const claude = path.join(fixture.home, '.claude');
+    await mkdir(path.join(claude, 'skills'), { recursive: true });
+    await mkdir(path.join(claude, 'agents'), { recursive: true });
+    await mkdir(path.join(claude, 'rules'), { recursive: true });
+    await symlink(path.join(store, 'linked'), path.join(claude, 'skills', 'linked'));
+    await symlink(
+      path.join(store, 'agents', 'linked-agent.md'),
+      path.join(claude, 'agents', 'linked-agent.md')
+    );
+    await symlink(path.join(store, 'rules', 'house.md'), path.join(claude, 'rules', 'house.md'));
+
+    const scan = await scanClaude(fixture.project);
+
+    assert.deepEqual(scan.warnings, []);
+    const linked = scan.skills.find((entry) => entry.name === 'linked');
+    assert.ok(linked, 'symlinked skill was skipped');
+    assert.equal(linked.scope, 'user');
+    assert.equal(linked.description, 'Lives elsewhere.');
+    assert.equal(linked.file, path.join(claude, 'skills', 'linked', 'SKILL.md'));
+    assert.ok(scan.agents.some((entry) => entry.name === 'linked-agent'));
+    assert.ok(scan.memory.some((entry) => entry.name === 'house.md'));
+  });
+});
+
+test('a broken skill link is reported, not silently skipped', async () => {
+  await withFixture(async (fixture) => {
+    const skills = path.join(fixture.home, '.claude', 'skills');
+    await mkdir(skills, { recursive: true });
+    const link = path.join(skills, 'ghost');
+    await symlink(path.join(fixture.home, 'store', 'gone'), link);
+
+    // A dead link in a directory that is walked twice — once for its
+    // subdirectories, once for its markdown — is still reported once.
+    const agents = path.join(fixture.home, '.claude', 'agents');
+    await mkdir(agents, { recursive: true });
+    const deadAgent = path.join(agents, 'ghost.md');
+    await symlink(path.join(fixture.home, 'store', 'ghost.md'), deadAgent);
+
+    const scan = await scanClaude(fixture.project);
+    assert.deepEqual(scan.skills, []);
+    assert.deepEqual(scan.agents, []);
+    assert.equal(scan.warnings.length, 2);
+    assert.deepEqual(
+      scan.warnings.map((warning) => warning.file).sort(),
+      [deadAgent, link].sort()
+    );
+    for (const warning of scan.warnings) {
+      assert.match(warning.message, /^broken symlink to .*; nothing is loaded from it$/);
+    }
+  });
+});
+
+test('a symlink loop under commands terminates instead of hanging', async () => {
+  await withFixture(async (fixture) => {
+    const commands = path.join(fixture.home, '.claude', 'commands');
+    await write(path.join(commands, 'ship.md'), skill('ship', 'Ships it.'));
+    await symlink(commands, path.join(commands, 'loop'));
+
+    const scan = await scanClaude(fixture.project);
+    assert.ok(scan.commands.some((entry) => entry.name === 'ship'));
+    // Recursion is depth-bounded, so the loop shows up as namespaced copies
+    // rather than as a hang, and every reported file exists.
+    for (const entry of scan.commands) {
+      assert.equal(await isFile(entry.file), true);
+    }
+  });
+});
+
+test('plugin skill visibility follows the plugin-qualified key only', async () => {
+  await withFixture(async (fixture) => {
+    await buildInstall(fixture);
+    await writeJson(path.join(fixture.project, '.claude', 'settings.local.json'), {
+      skillOverrides: { 'demo:deploy': 'name-only' }
+    });
+    const scan = await scanClaude(fixture.project);
+    const deploy = scan.skills.find((entry) => entry.qualifiedName === 'demo:deploy');
+    assert.ok(deploy);
+    assert.equal(deploy.visibility, 'name-only');
+    assert.equal(
+      deploy.visibilitySource,
+      path.join(fixture.project, '.claude', 'settings.local.json')
+    );
+  });
+});
+
+test('a plugin .mcp.json without the mcpServers wrapper still counts', async () => {
+  await withFixture(async (fixture) => {
+    await buildInstall(fixture);
+    // The official playwright plugin ships exactly this shape and Claude Code
+    // loads it, so rejecting it drops a server the developer really has.
+    await writeJson(path.join(fixture.pluginRoot, '.mcp.json'), {
+      'demo-server': { command: 'demo', args: ['--stdio'] }
+    });
+
+    const scan = await scanClaude(fixture.project);
+    assert.deepEqual(scan.warnings, []);
+    const server = scan.mcpServers.find((entry) => entry.name === 'demo-server');
+    assert.ok(server);
+    assert.equal(server.scope, 'plugin');
+    assert.equal(server.transport, 'stdio');
+    assert.deepEqual(server.args, ['--stdio']);
+  });
+});
+
+test('a project .mcp.json without the wrapper is still a warning', async () => {
+  await withFixture(async (fixture) => {
+    await writeJson(path.join(fixture.project, '.mcp.json'), { approved: { command: 'node' } });
+    const scan = await scanClaude(fixture.project);
+    assert.equal(scan.mcpServers.length, 0);
+    assert.equal(scan.warnings.length, 1);
+    assert.match(scan.warnings[0]?.message ?? '', /mcpServers key/);
+  });
+});
+
+test('~/.claude.json contributes user and project-local MCP servers', async () => {
+  await withFixture(async (fixture) => {
+    const globalFile = path.join(fixture.home, '.claude.json');
+    await writeJson(globalFile, {
+      mcpServers: {
+        context7: { type: 'http', url: 'https://mcp.test/mcp' },
+        shared: { command: 'user-copy' }
+      },
+      disableBundledSkills: true,
+      projects: {
+        [fixture.project]: {
+          mcpServers: { scratch: { command: 'scratch' }, shared: { command: 'local-copy' } },
+          enabledMcpjsonServers: ['pending'],
+          disabledMcpServers: ['context7']
+        }
+      }
+    });
+    await writeJson(path.join(fixture.project, '.mcp.json'), {
+      mcpServers: { pending: { command: 'python' } }
+    });
+
+    const scan = await scanClaude(fixture.project);
+    assert.deepEqual(scan.warnings, []);
+
+    const context7 = scan.mcpServers.find((entry) => entry.name === 'context7');
+    assert.ok(context7, 'user-scope server from ~/.claude.json was missed');
+    assert.equal(context7.scope, 'user');
+    assert.equal(context7.transport, 'http');
+    assert.equal(context7.file, globalFile);
+    // Switched off for this project in the client's own state file.
+    assert.equal(context7.enabled, false);
+    assert.equal(context7.enabledSource, globalFile);
+
+    const scratch = scan.mcpServers.find((entry) => entry.name === 'scratch');
+    assert.ok(scratch);
+    assert.equal(scratch.scope, 'local');
+    assert.equal(scratch.enabled, true);
+
+    // A project-local server shadows the user server of the same name.
+    const shared = scan.mcpServers.filter((entry) => entry.name === 'shared');
+    assert.equal(shared.length, 1);
+    assert.equal(shared[0]?.scope, 'local');
+    assert.equal(shared[0]?.command, 'local-copy');
+
+    // Approvals recorded by the client itself, not in settings.json.
+    const pending = scan.mcpServers.find((entry) => entry.name === 'pending');
+    assert.ok(pending);
+    assert.equal(pending.enabled, true);
+    assert.equal(pending.enabledSource, globalFile);
+    assert.deepEqual(scan.settings.enabledMcpjsonServers, ['pending']);
+
+    assert.equal(scan.settings.disableBundledSkills, true);
+    assert.equal(scan.settings.sources.disableBundledSkills, globalFile);
+    assert.deepEqual(scan.settings.disabledMcpServers, ['context7']);
+  });
+});
+
+test('a plugin server switched off in ~/.claude.json reports as off', async () => {
+  await withFixture(async (fixture) => {
+    await buildInstall(fixture);
+    const globalFile = path.join(fixture.home, '.claude.json');
+    await writeJson(globalFile, {
+      projects: { [fixture.project]: { disabledMcpServers: ['plugin:demo:demo-server'] } }
+    });
+
+    const scan = await scanClaude(fixture.project);
+    const server = scan.mcpServers.find((entry) => entry.name === 'demo-server');
+    assert.ok(server);
+    assert.equal(server.enabled, false);
+    assert.equal(server.enabledSource, globalFile);
+  });
+});
+
+test('a settings file with a BOM is read, not called corrupt', async () => {
+  await withFixture(async (fixture) => {
+    await write(
+      path.join(fixture.home, '.claude', 'settings.json'),
+      `﻿${JSON.stringify({ skillListingMaxDescChars: 700 }, null, 2)}\n`
+    );
+    const scan = await scanClaude(fixture.project);
+    assert.deepEqual(scan.warnings, []);
+    assert.equal(scan.settings.skillListingMaxDescChars, 700);
+  });
+});
+
+test('an unreadable settings file warns instead of scanning as empty', async () => {
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    return; // root reads everything, so there is nothing to observe.
+  }
+  await withFixture(async (fixture) => {
+    const file = path.join(fixture.home, '.claude', 'settings.json');
+    await writeJson(file, { skillListingMaxDescChars: 700 });
+    await chmod(file, 0o000);
+    try {
+      const scan = await scanClaude(fixture.project);
+      assert.equal(scan.settings.skillListingMaxDescChars, 1536);
+      const warning = scan.warnings.find((entry) => entry.file === file);
+      assert.ok(warning, 'an unreadable settings file was silently ignored');
+      assert.match(warning.message, /could not read/);
+    } finally {
+      await chmod(file, 0o600);
+    }
+  });
+});
+
+test('a directory where a settings file belongs warns', async () => {
+  await withFixture(async (fixture) => {
+    const file = path.join(fixture.home, '.claude', 'settings.json');
+    await mkdir(file, { recursive: true });
+    const scan = await scanClaude(fixture.project);
+    const warning = scan.warnings.find((entry) => entry.file === file);
+    assert.ok(warning);
+    assert.match(warning.message, /could not read/);
+  });
+});
+
+test('an unreadable directory warns instead of reporting no skills', async () => {
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    return;
+  }
+  await withFixture(async (fixture) => {
+    const skills = path.join(fixture.home, '.claude', 'skills');
+    await write(path.join(skills, 'alpha', 'SKILL.md'), skill('alpha', 'First skill.'));
+    await chmod(skills, 0o000);
+    try {
+      const scan = await scanClaude(fixture.project);
+      assert.deepEqual(scan.skills, []);
+      const warning = scan.warnings.find((entry) => entry.file === skills);
+      assert.ok(warning);
+      assert.match(warning.message, /could not list directory/);
+    } finally {
+      await chmod(skills, 0o700);
+    }
+  });
+});
+
+test('an empty settings file warns and leaves the rest of the scan intact', async () => {
+  await withFixture(async (fixture) => {
+    await buildInstall(fixture);
+    await write(path.join(fixture.home, '.claude', 'settings.json'), '');
+    const scan = await scanClaude(fixture.project);
+    const warning = scan.warnings.find(
+      (entry) => entry.file === path.join(fixture.home, '.claude', 'settings.json')
+    );
+    assert.ok(warning);
+    assert.match(warning.message, /invalid JSON/);
+    assert.ok(scan.skills.some((entry) => entry.name === 'alpha'));
+    assert.ok(scan.plugins.some((entry) => entry.qualifiedName === 'demo@acme'));
+  });
+});
+
+test('a settings file that is an array warns rather than merging', async () => {
+  await withFixture(async (fixture) => {
+    const file = path.join(fixture.home, '.claude', 'settings.json');
+    await writeJson(file, ['not', 'settings']);
+    const scan = await scanClaude(fixture.project);
+    assert.deepEqual(scan.settings.loaded, []);
+    assert.deepEqual(scan.warnings, [
+      { client: 'claude', file, message: 'expected a JSON object' }
+    ]);
+  });
+});
+
+test('malformed hook shapes warn without dropping the good hooks', async () => {
+  await withFixture(async (fixture) => {
+    await writeJson(path.join(fixture.home, '.claude', 'settings.json'), {
+      hooks: {
+        PreToolUse: 'nope',
+        SessionStart: [
+          { hooks: [{ type: 'command' }] },
+          { hooks: [{ type: 'command', command: 'good.sh' }] }
+        ]
+      }
+    });
+    const scan = await scanClaude(fixture.project);
+    assert.equal(scan.hooks.length, 1);
+    assert.equal(scan.hooks[0]?.command, 'good.sh');
+    assert.equal(scan.hooks[0]?.index, 0);
+    const messages = scan.warnings.map((entry) => entry.message);
+    assert.ok(messages.some((message) => /hooks\.PreToolUse is not an array/.test(message)));
+    assert.ok(messages.some((message) => /has no command/.test(message)));
+  });
+});
+
+test('mutators leave the disk untouched on a dry run and back up what they replace', async () => {
+  await withFixture(async (fixture) => {
+    await buildInstall(fixture);
+    const file = path.join(fixture.home, '.claude', 'settings.json');
+    const before = await readFile(file, 'utf8');
+
+    const plugin = await setPluginEnabled({
+      plugin: 'demo',
+      enabled: false,
+      projectRoot: fixture.project,
+      dryRun: true
+    });
+    const mcp = await setMcpEnabled({
+      server: 'approved',
+      enabled: false,
+      projectRoot: fixture.project,
+      dryRun: true
+    });
+    const moved = await setSkillDirectoryEnabled({
+      skill: 'alpha',
+      enabled: false,
+      projectRoot: fixture.project,
+      dryRun: true
+    });
+
+    assert.equal(plugin.changed, true);
+    assert.equal(mcp.changed, true);
+    assert.equal(moved.moved, false);
+    assert.equal(await readFile(file, 'utf8'), before, 'a dry run rewrote the file');
+    assert.equal(await isDir(path.join(fixture.home, '.claude', 'skills', 'alpha')), true);
+    assert.equal(
+      await isDir(path.join(fixture.home, '.claude', 'skills.disabled', 'alpha')),
+      false
+    );
+    assert.equal(await isDir(path.join(fixture.home, '.yard', 'backups')), false);
+
+    // A real write backs the previous contents up under the Yard backup dir.
+    const real = await setPluginEnabled({
+      plugin: 'demo',
+      enabled: false,
+      projectRoot: fixture.project
+    });
+    assert.ok(real.backup, 'no backup was taken before overwriting settings.json');
+    assert.equal(path.dirname(real.backup), path.join(fixture.home, '.yard', 'backups'));
+    assert.equal(await readFile(real.backup, 'utf8'), before);
+    assert.notEqual(await readFile(file, 'utf8'), before);
+  });
+});
+
+test('setSkillVisibility rejects a visibility Claude Code does not have', async () => {
+  await withFixture(async (fixture) => {
+    await assert.rejects(
+      setSkillVisibility({
+        skill: 'alpha',
+        visibility: 'hidden' as never,
+        projectRoot: fixture.project
+      }),
+      /unknown skill visibility/
+    );
+    assert.equal(await isDir(path.join(fixture.home, '.claude')), false);
+  });
+});
+
+test('a skill in both skills and skills.disabled yields one entry and a warning', async () => {
+  await withFixture(async (fixture) => {
+    const claude = path.join(fixture.home, '.claude');
+    await write(path.join(claude, 'skills', 'alpha', 'SKILL.md'), skill('alpha', 'Live copy.'));
+    await write(
+      path.join(claude, 'skills.disabled', 'alpha', 'SKILL.md'),
+      skill('alpha', 'Parked copy.')
+    );
+
+    const scan = await scanClaude(fixture.project);
+    const alpha = scan.skills.filter((entry) => entry.name === 'alpha');
+    assert.equal(alpha.length, 1);
+    assert.equal(alpha[0]?.description, 'Live copy.');
+    assert.equal(alpha[0]?.visibility, 'on');
+    assert.equal(scan.warnings.length, 1);
+    assert.match(scan.warnings[0]?.message ?? '', /duplicate skill "alpha"/);
+    assert.equal(new Set(scan.skills.map((entry) => entry.id)).size, scan.skills.length);
   });
 });
 

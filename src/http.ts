@@ -5,7 +5,14 @@ import { createMcpHandler } from '@modelcontextprotocol/server';
 import { Hono, type Context } from 'hono';
 import { adaptPlugin } from './adapt.js';
 import { assertInsideRoot, indexOf, type Catalog } from './catalog.js';
-import { actionTarget, ENV_KINDS, filterInventory, isEnvKind, type ActionTarget } from './env-api.js';
+import {
+  actionTarget,
+  ENV_KINDS,
+  filterInventory,
+  isEnvKind,
+  type ActionTarget,
+  type EnvKind
+} from './env-api.js';
 import {
   setMcpEnabled,
   setPluginEnabled,
@@ -378,7 +385,7 @@ function clientParam(value: string | undefined): Client | undefined {
   return value;
 }
 
-function kindParam(value: string | undefined) {
+function kindParam(value: string | undefined): EnvKind | undefined {
   if (!value) {
     return undefined;
   }

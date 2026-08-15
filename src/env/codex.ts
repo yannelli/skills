@@ -850,6 +850,7 @@ export async function addMcpServer(options: AddMcpServerOptions): Promise<CodexC
   if (hasCommand === hasUrl) {
     throw new Error(`addMcpServer(${options.name}): pass exactly one of command or url`);
   }
+  assertServerName(options.name);
 
   const argv = ['mcp', 'add', options.name];
   for (const [key, value] of Object.entries(options.env ?? {})) {
@@ -870,7 +871,19 @@ export async function removeMcpServer(
   name: string,
   options: CodexCliOptions = {}
 ): Promise<CodexCliResult> {
+  assertServerName(name);
   return runCodex(['mcp', 'remove', name], options);
+}
+
+/**
+ * `codex mcp add` takes the name as a positional argument, so a name that
+ * looks like a flag would be read as one and the command would do something
+ * other than what the caller asked for.
+ */
+function assertServerName(name: string): void {
+  if (name === '' || name.startsWith('-')) {
+    throw new Error(`"${name}" is not a usable MCP server name`);
+  }
 }
 
 const execFileAsync = promisify(execFile);
@@ -1101,6 +1114,11 @@ function readEscape(cursor: Cursor, triple: boolean): string {
   cursor.pos += 1;
   const char = cursor.text[cursor.pos];
   if (char === undefined) {
+    // Inside a multi-line string the escape is the line-continuation one, and
+    // what it escapes is on the next line — which has not been read yet.
+    if (triple) {
+      throw new IncompleteValue('unterminated escape');
+    }
     throw new Error('unterminated escape');
   }
   const simple = SIMPLE_ESCAPES[char];

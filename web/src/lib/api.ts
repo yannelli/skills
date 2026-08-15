@@ -175,17 +175,18 @@ export type ActionResult = {
   detail: string;
 };
 
-export const INVENTORY_KINDS = [
-  'skill',
-  'plugin',
+/** The `kind` vocabulary /api/env/inventory accepts. Mirrors ENV_KINDS in src/env-api.ts. */
+export const ENV_KINDS = [
+  'skills',
+  'plugins',
   'mcp',
-  'hook',
-  'agent',
-  'command',
+  'hooks',
+  'agents',
+  'commands',
   'memory'
 ] as const;
 
-export type InventoryKind = (typeof INVENTORY_KINDS)[number];
+export type EnvKind = (typeof ENV_KINDS)[number];
 
 export const ARTIFACT_KINDS = ['skill', 'rule', 'agent', 'command', 'hook', 'mcp'] as const;
 
@@ -250,7 +251,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return data as T;
 }
 
-export function fetchInventory(filter: { client?: Client; kind?: InventoryKind } = {}): Promise<Inventory> {
+export function fetchInventory(filter: { client?: Client; kind?: EnvKind } = {}): Promise<Inventory> {
   const params = new URLSearchParams();
   if (filter.client) {
     params.set('client', filter.client);

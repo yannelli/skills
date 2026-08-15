@@ -358,7 +358,9 @@ function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
   if (pid === undefined) {
     return;
   }
-  if (KILL_GROUP) {
+  // `process.kill(-0, ...)` signals our own process group. A spawned child is
+  // never pid 0 or 1, but the blast radius of being wrong here is the whole CLI.
+  if (KILL_GROUP && pid > 1) {
     try {
       process.kill(-pid, signal);
       return;

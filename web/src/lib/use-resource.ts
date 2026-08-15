@@ -9,10 +9,12 @@ export type Resource<T> = {
   reload: () => void;
 };
 
-type State<T> = {
-  data: T | undefined;
-  error: string | undefined;
-  loading: boolean;
+/** What one finished request produced, tagged with the request it answers. */
+type Settled<T> = {
+  load: () => Promise<T>;
+  nonce: number;
+  data?: T;
+  error?: string;
 };
 
 /**
@@ -20,29 +22,25 @@ type State<T> = {
  * Pass a `useCallback` whose dependencies are the request parameters: changing
  * them refetches, and nothing else does.
  *
- * The previous value is kept while a refetch is in flight so a slow probe does
- * not blank the page the user is reading.
+ * `loading` is derived by comparing the settled result against the request in
+ * flight rather than being set from inside the effect, which keeps the previous
+ * value on screen while a slow probe runs instead of blanking the page.
  */
 export function useResource<T>(load: () => Promise<T>, fallbackError: string): Resource<T> {
-  const [state, setState] = useState<State<T>>({ data: undefined, error: undefined, loading: true });
+  const [settled, setSettled] = useState<Settled<T> | undefined>(undefined);
   const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     let live = true;
-    setState((previous) => ({ data: previous.data, error: undefined, loading: true }));
     load().then(
       (data) => {
         if (live) {
-          setState({ data, error: undefined, loading: false });
+          setSettled({ load, nonce, data });
         }
       },
       (error: unknown) => {
         if (live) {
-          setState((previous) => ({
-            data: previous.data,
-            error: messageOf(error, fallbackError),
-            loading: false
-          }));
+          setSettled({ load, nonce, error: messageOf(error, fallbackError) });
         }
       }
     );
@@ -55,5 +53,12 @@ export function useResource<T>(load: () => Promise<T>, fallbackError: string): R
     setNonce((current) => current + 1);
   }, []);
 
-  return { data: state.data, error: state.error, loading: state.loading, reload };
+  const current = settled && settled.load === load && settled.nonce === nonce ? settled : undefined;
+
+  return {
+    data: current ? current.data : settled?.data,
+    error: current?.error,
+    loading: current === undefined,
+    reload
+  };
 }

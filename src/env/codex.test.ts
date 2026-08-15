@@ -248,7 +248,41 @@ test('parseToml handles scalars, arrays, inline tables and comments', () => {
   assert.deepEqual(parsed['step'], [{ name: 'first' }, { name: 'second' }]);
 });
 
+test('parseToml reads values that span several lines', () => {
+  const parsed = parseToml(
+    [
+      'basic = """',
+      'line one',
+      'line two\\',
+      '   joined"""',
+      "literal = '''",
+      'C:\\raw\\path',
+      "'''",
+      'table = { x = 1,',
+      '  y = "two" }',
+      'rows = [',
+      '  { name = "a" },',
+      '  { name = "b" }',
+      ']',
+      'after = 1'
+    ].join('\n')
+  );
+
+  // A trailing backslash swallows the newline and the indent after it.
+  assert.equal(parsed['basic'], 'line one\nline twojoined');
+  assert.equal(parsed['literal'], 'C:\\raw\\path\n');
+  assert.deepEqual(parsed['table'], { x: 1, y: 'two' });
+  assert.deepEqual(parsed['rows'], [{ name: 'a' }, { name: 'b' }]);
+  // Parsing resumed on the right line after each multi-line value.
+  assert.equal(parsed['after'], 1);
+  assert.equal(parseToml('a = "\\u00e9\\U0001F600"\n')['a'], 'é😀');
+});
+
 test('parseToml reports where a malformed line is', () => {
+  assert.throws(() => parseToml('a = """\nnever closed\n'), /line 3: unterminated multi-line string/);
+  assert.throws(() => parseToml('a = [1,\n2,\n'), /line 3: unterminated array/);
+  assert.throws(() => parseToml('a = "\\q"\n'), /line 1: unknown escape/);
+  assert.throws(() => parseToml('[]\n'), /line 1/);
   assert.throws(() => parseToml('model = "gpt"\nbroken\n'), /line 2/);
   assert.throws(() => parseToml('[unterminated\n'), /line 1/);
 });
@@ -745,6 +779,15 @@ test('addMcpServer refuses an ambiguous server definition', async () => {
       /exactly one of command or url/
     );
     await assert.rejects(() => addMcpServer({ name: 'x' }), /exactly one of command or url/);
+    // A name that looks like a flag would be read as one by the CLI.
+    await assert.rejects(
+      () => addMcpServer({ name: '--url', command: 'node', dryRun: true }),
+      /is not a usable MCP server name/
+    );
+    await assert.rejects(
+      () => removeMcpServer('', { dryRun: true }),
+      /is not a usable MCP server name/
+    );
   });
 });
 

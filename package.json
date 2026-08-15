@@ -9,7 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "tsx src/cli.ts",
+    "start": "tsx src/cli.ts serve",
     "yard": "tsx src/cli.ts",
     "adapt": "tsx src/cli.ts --adapt",
     "sync-mcp": "tsx src/cli.ts --emit-mcp",

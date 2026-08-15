@@ -91,9 +91,14 @@ export async function buildContextReport(
       ...(skill.description.length > maxDescChars
         ? { detail: `description truncated at ${maxDescChars} chars` }
         : {}),
-      ...(skill.client === 'claude' && skill.scope !== 'plugin'
-        ? { remedy: `yard skill ${skill.qualifiedName} off` }
-        : {})
+      // A plugin skill cannot be switched off individually — Claude Code's
+      // skillOverrides deliberately does not apply to them — so the lever is
+      // the plugin. Saying so is more useful than leaving the row blank.
+      ...(skill.scope === 'plugin' && skill.plugin
+        ? { remedy: `yard plugin disable ${skill.plugin}` }
+        : skill.client === 'claude'
+          ? { remedy: `yard skill ${skill.qualifiedName} user-invocable-only` }
+          : {})
     });
   }
 
@@ -207,4 +212,65 @@ function tokensFromBytes(bytes: number): number {
 /** The lines worth acting on first: expensive, and switchable off. */
 export function topOffenders(report: ContextReport, limit = 10): ContextLine[] {
   return report.lines.filter((line) => line.remedy).slice(0, limit);
+}
+
+export type ContextLever = {
+  label: string;
+  client: Client;
+  kind: ContextKind;
+  tokens: number;
+  /** How many lines were rolled up. */
+  count: number;
+  remedy?: string;
+};
+
+/**
+ * The same total, grouped by the thing you can actually switch off.
+ *
+ * A ranked list of individual lines is misleading: four hundred skills at sixty
+ * tokens each dwarf any single MCP server, yet every row looks trivial. Rolling
+ * a plugin's skills up under the plugin puts the real levers at the top.
+ */
+export function biggestLevers(report: ContextReport, limit = 10): ContextLever[] {
+  const groups = new Map<string, ContextLever>();
+
+  for (const line of report.lines) {
+    const key = leverKey(line);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.tokens += line.tokens;
+      existing.count += 1;
+      continue;
+    }
+    groups.set(key, {
+      label: leverLabel(line),
+      client: line.client,
+      kind: line.kind,
+      tokens: line.tokens,
+      count: 1,
+      ...(line.remedy ? { remedy: line.remedy } : {})
+    });
+  }
+
+  return [...groups.values()]
+    .sort((a, b) => b.tokens - a.tokens || a.label.localeCompare(b.label))
+    .slice(0, limit);
+}
+
+function leverKey(line: ContextLine): string {
+  const plugin = pluginOf(line);
+  return plugin ? `${line.client}:${line.kind}:plugin:${plugin}` : `${line.client}:${line.kind}:${line.label}`;
+}
+
+function leverLabel(line: ContextLine): string {
+  return pluginOf(line) ?? line.label;
+}
+
+/** Skill ids are `<client>:plugin:<plugin>:<name>`. */
+function pluginOf(line: ContextLine): string | undefined {
+  if (line.kind !== 'skill') {
+    return undefined;
+  }
+  const parts = line.id.split(':');
+  return parts[1] === 'plugin' ? parts[2] : undefined;
 }

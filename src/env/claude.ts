@@ -1,10 +1,10 @@
 import type { Dirent } from 'node:fs';
-import { mkdir, readFile, readdir, rename } from 'node:fs/promises';
+import { mkdir, readFile, readdir, readlink, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter } from '../frontmatter.js';
 import { backupDir, claudePaths } from './client-paths.js';
 import { collectSkillDirs } from './skill-dirs.js';
-import { isDir, isFile, parseJsonc, readText, writeJsonSafely } from './safe-io.js';
+import { exists, isDir, isFile, parseJsonc, readText, writeJsonSafely } from './safe-io.js';
 import type { WriteResult } from './safe-io.js';
 import { SKILL_VISIBILITIES } from './types.js';
 import type {
@@ -1413,11 +1413,41 @@ async function listChildDirs(dir: string, warnings: ScanWarning[]): Promise<stri
   for (const entry of await readEntries(dir, warnings)) {
     if (entry.isDirectory()) {
       names.push(entry.name);
-    } else if (entry.isSymbolicLink() && (await isDir(path.join(dir, entry.name)))) {
+      continue;
+    }
+    if (!entry.isSymbolicLink()) {
+      continue;
+    }
+    const target = path.join(dir, entry.name);
+    if (await isDir(target)) {
       names.push(entry.name);
+    } else {
+      await warnIfBrokenLink(target, warnings);
     }
   }
   return names.sort();
+}
+
+/**
+ * A link whose target is gone is invisible to the client and to `ls`, and it
+ * is the likeliest reason a developer's skill "disappeared" — worth saying out
+ * loud rather than skipping in silence.
+ */
+async function warnIfBrokenLink(target: string, warnings: ScanWarning[]): Promise<void> {
+  if (await exists(target)) {
+    return;
+  }
+  // One directory is walked for both its subdirectories and its markdown, so
+  // the same dead link can be met twice.
+  if (warnings.some((warning) => warning.file === target && warning.message.startsWith('broken'))) {
+    return;
+  }
+  const to = await readlink(target).catch(() => undefined);
+  warnings.push({
+    client: 'claude',
+    file: target,
+    message: `broken symlink${to ? ` to ${to}` : ''}; nothing is loaded from it`
+  });
 }
 
 /** Files with the given extension, counting symlinks that point at one. */
@@ -1433,8 +1463,16 @@ async function listChildFiles(
     }
     if (entry.isFile()) {
       names.push(entry.name);
-    } else if (entry.isSymbolicLink() && (await isFile(path.join(dir, entry.name)))) {
+      continue;
+    }
+    if (!entry.isSymbolicLink()) {
+      continue;
+    }
+    const target = path.join(dir, entry.name);
+    if (await isFile(target)) {
       names.push(entry.name);
+    } else {
+      await warnIfBrokenLink(target, warnings);
     }
   }
   return names.sort();
