@@ -42,6 +42,10 @@ $ yard context
   and read their real tool schemas.
 ```
 
+The same bill, served — `yard serve`, here pointed at the generated benchmark setup:
+
+![The Yard web UI: 35k estimated tokens per turn, split by kind and by client, with the ranked cost table below](docs/context-ui.png)
+
 ## Install
 
 ```bash

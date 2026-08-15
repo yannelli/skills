@@ -30,6 +30,9 @@ const SCALE = scaleArg ? Number(scaleArg.split('=')[1]) : 1;
 const JSON_OUT = args.has('--json');
 
 const SAVINGS = args.has('--savings');
+// Build the synthetic setup, print where it is, and keep it. For pointing a
+// live `yard` at a big believable install: YARD_HOME=<home> yard scan --project=<project>
+const FIXTURE_ONLY = args.has('--fixture');
 
 const WARMUP = 2;
 const RUNS = 7;
@@ -316,6 +319,12 @@ function main() {
   const fixture = buildFixture(SCALE);
   const env = { ...process.env, YARD_HOME: fixture.home, NO_COLOR: '1' };
   const projectFlag = `--project=${fixture.project}`;
+
+  if (FIXTURE_ONLY) {
+    console.log(`YARD_HOME=${fixture.home}`);
+    console.log(`project:  ${fixture.project}`);
+    return;
+  }
 
   try {
     // What did the fixture actually produce? Report measured counts, not goals.
