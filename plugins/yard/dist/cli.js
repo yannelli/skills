@@ -395,13 +395,13 @@ __export(codex_exports, {
 });
 import { execFile } from "node:child_process";
 import { mkdir as mkdir5, readdir as readdir5, rename as rename4 } from "node:fs/promises";
-import path10 from "node:path";
+import path11 from "node:path";
 import { promisify } from "node:util";
 async function scanCodex(projectRoot) {
   const paths = codexPaths(projectRoot);
   const warnings = [];
   const warn = (file, message) => {
-    warnings.push({ client: CLIENT, file, message });
+    warnings.push({ client: CLIENT2, file, message });
   };
   const installed = await isDir2(paths.dir);
   const skills = [];
@@ -417,7 +417,7 @@ async function scanCodex(projectRoot) {
   );
   skills.push(
     ...await readSkillTree(
-      path10.join(paths.userSkills, SYSTEM_SKILLS),
+      path11.join(paths.userSkills, SYSTEM_SKILLS),
       "builtin",
       "on",
       void 0,
@@ -486,7 +486,7 @@ function configMcpServers(config2, file, warn) {
     const headers = asStringRecord2(table["http_headers"]);
     entries.push(
       mcpEntry({
-        id: `${CLIENT}:user:${name}`,
+        id: `${CLIENT2}:user:${name}`,
         scope: "user",
         name,
         file,
@@ -508,7 +508,7 @@ function mcpEntry(source) {
   const enabled = asBoolean(table["enabled"]);
   return {
     id: source.id,
-    client: CLIENT,
+    client: CLIENT2,
     scope: source.scope,
     name: source.name,
     transport: transportOf(asString(table["type"]), url2),
@@ -520,6 +520,7 @@ function mcpEntry(source) {
     ...headers ? { headers } : {},
     file: source.file,
     ...source.plugin !== void 0 ? { plugin: source.plugin } : {},
+    ...source.pluginRoot !== void 0 ? { pluginRoot: source.pluginRoot } : {},
     enabled: enabled ?? true,
     ...enabled === void 0 ? {} : { enabledSource: source.file }
   };
@@ -530,7 +531,7 @@ function transportOf(declared, url2) {
   }
   return url2 === void 0 ? "stdio" : "http";
 }
-async function readHookFile(file, scope, plugin, warn, required2 = false) {
+async function readHookFile(file, scope, plugin, warn, required2 = false, pluginRoot) {
   const read = await readJsonChecked(file);
   if (read.missing) {
     if (await exists2(file)) {
@@ -549,9 +550,9 @@ async function readHookFile(file, scope, plugin, warn, required2 = false) {
     warn(file, 'no "hooks" object');
     return [];
   }
-  return hookEntries(events, file, scope, plugin, warn);
+  return hookEntries(events, file, scope, plugin, warn, pluginRoot);
 }
-function hookEntries(events, file, scope, plugin, warn) {
+function hookEntries(events, file, scope, plugin, warn, pluginRoot) {
   const entries = [];
   for (const [event, groups] of Object.entries(events)) {
     if (!Array.isArray(groups)) {
@@ -578,8 +579,8 @@ function hookEntries(events, file, scope, plugin, warn) {
         const type = table["type"] === "prompt" ? "prompt" : "command";
         const timeout = asNumber(table["timeout"]);
         entries.push({
-          id: `${CLIENT}:${scope}:${plugin ? `${plugin}:` : ""}${event}:${index}`,
-          client: CLIENT,
+          id: `${CLIENT2}:${scope}:${plugin ? `${plugin}:` : ""}${event}:${index}`,
+          client: CLIENT2,
           scope,
           event,
           ...matcher !== void 0 ? { matcher } : {},
@@ -588,6 +589,7 @@ function hookEntries(events, file, scope, plugin, warn) {
           ...timeout !== void 0 ? { timeout } : {},
           file,
           ...plugin !== void 0 ? { plugin } : {},
+          ...pluginRoot !== void 0 ? { pluginRoot } : {},
           enabled: true,
           index
         });
@@ -601,7 +603,7 @@ async function readSkillTree(root, scope, visibility, visibilitySource, warn, pl
   const entries = [];
   const dirs = skillDirs ?? await listSkillDirs(root, warn);
   for (const skillDir of dirs) {
-    const name = path10.basename(skillDir);
+    const name = path11.basename(skillDir);
     if (name.startsWith(".")) {
       continue;
     }
@@ -630,7 +632,7 @@ async function listSkillDirs(root, warn) {
     if (entry.name.startsWith(".")) {
       continue;
     }
-    const dir = path10.join(root, entry.name);
+    const dir = path11.join(root, entry.name);
     if (!entry.link) {
       dirs.push(dir);
       continue;
@@ -644,7 +646,7 @@ async function listSkillDirs(root, warn) {
   return dirs;
 }
 async function readSkill(dir, name, warn, options) {
-  const file = path10.join(dir, "SKILL.md");
+  const file = path11.join(dir, "SKILL.md");
   const raw2 = await readText(file);
   if (raw2 === void 0) {
     warn(file, "skill directory has no readable SKILL.md");
@@ -653,8 +655,8 @@ async function readSkill(dir, name, warn, options) {
   const { data } = parseFrontmatter(raw2);
   const qualifiedName = options.plugin ? `${options.plugin}:${name}` : name;
   return {
-    id: `${CLIENT}:${options.scope}:${qualifiedName}`,
-    client: CLIENT,
+    id: `${CLIENT2}:${options.scope}:${qualifiedName}`,
+    client: CLIENT2,
     scope: options.scope,
     name,
     qualifiedName,
@@ -674,10 +676,10 @@ async function readMemory(file, scope, warn) {
     return void 0;
   }
   return {
-    id: `${CLIENT}:${scope}:${path10.basename(file)}`,
-    client: CLIENT,
+    id: `${CLIENT2}:${scope}:${path11.basename(file)}`,
+    client: CLIENT2,
     scope,
-    name: path10.basename(file),
+    name: path11.basename(file),
     file,
     bytes: Buffer.byteLength(raw2, "utf8")
   };
@@ -685,14 +687,14 @@ async function readMemory(file, scope, warn) {
 async function scanPlugins2(cacheDir, collected, warn) {
   const plugins = [];
   for (const marketplace of await listDirs(cacheDir)) {
-    const marketplaceDir = path10.join(cacheDir, marketplace);
+    const marketplaceDir = path11.join(cacheDir, marketplace);
     const installed = /* @__PURE__ */ new Set();
     for (const dirName of await listDirs(marketplaceDir)) {
-      const root = await resolvePluginRoot(path10.join(marketplaceDir, dirName));
+      const root = await resolvePluginRoot(path11.join(marketplaceDir, dirName));
       if (!root) {
         continue;
       }
-      const entry = await readPlugin(root, dirName, marketplace, collected, warn);
+      const entry = await readPlugin2(root, dirName, marketplace, collected, warn);
       installed.add(dirName);
       installed.add(entry.name);
       plugins.push(entry);
@@ -715,20 +717,20 @@ function uniquePluginId(base, marketplace, seen) {
   return id;
 }
 async function resolvePluginRoot(dir) {
-  if (await isFile2(path10.join(dir, PLUGIN_MANIFEST))) {
+  if (await isFile2(path11.join(dir, PLUGIN_MANIFEST))) {
     return dir;
   }
   const versions = await listDirs(dir);
   for (const version2 of [...versions].reverse()) {
-    const candidate = path10.join(dir, version2);
-    if (await isFile2(path10.join(candidate, PLUGIN_MANIFEST))) {
+    const candidate = path11.join(dir, version2);
+    if (await isFile2(path11.join(candidate, PLUGIN_MANIFEST))) {
       return candidate;
     }
   }
   return void 0;
 }
-async function readPlugin(root, dirName, marketplace, collected, warn) {
-  const manifestFile = path10.join(root, PLUGIN_MANIFEST);
+async function readPlugin2(root, dirName, marketplace, collected, warn) {
+  const manifestFile = path11.join(root, PLUGIN_MANIFEST);
   const read = await readJsonChecked(manifestFile);
   if (read.error !== void 0) {
     warn(manifestFile, `could not parse JSON: ${read.error}`);
@@ -739,7 +741,7 @@ async function readPlugin(root, dirName, marketplace, collected, warn) {
   const manifest = isTable(read.value) ? read.value : {};
   const name = asString(manifest.name) ?? dirName;
   const skills = await readSkillTree(
-    path10.resolve(root, DEFAULT_PLUGIN_SKILLS),
+    path11.resolve(root, DEFAULT_PLUGIN_SKILLS),
     "plugin",
     "on",
     void 0,
@@ -747,32 +749,34 @@ async function readPlugin(root, dirName, marketplace, collected, warn) {
     name,
     await collectSkillDirs(root, containedRefs(root, manifest.skills, manifestFile, warn))
   );
-  const mcpServers = await pluginMcpServers(root, manifest, name, warn);
+  const mcpServers = await pluginMcpServers2(root, manifest, name, warn);
   const hooks = await pluginHooks(root, manifest, name, warn);
+  const otherContributions = await pluginApps(root, manifest, warn);
   collected.skills.push(...skills);
   collected.mcpServers.push(...mcpServers);
   collected.hooks.push(...hooks);
   return {
-    id: `${CLIENT}:plugin:${name}`,
-    client: CLIENT,
+    id: `${CLIENT2}:plugin:${name}`,
+    client: CLIENT2,
     scope: "plugin",
     name,
     marketplace,
     qualifiedName: name,
     description: asString(manifest.description) ?? "",
-    version: asString(manifest.version) ?? path10.basename(root),
+    version: asString(manifest.version) ?? path11.basename(root),
     root,
     enabled: true,
     installed: true,
     skills: skills.length,
     hooks: hooks.length,
-    mcpServers: mcpServers.length
+    mcpServers: mcpServers.length,
+    ...otherContributions > 0 ? { otherContributions } : {}
   };
 }
-function containedPath(root, relative) {
-  const resolved = path10.resolve(root, relative);
-  const rel = path10.relative(root, resolved);
-  if (rel === ".." || rel.startsWith(`..${path10.sep}`) || path10.isAbsolute(rel)) {
+function containedPath2(root, relative) {
+  const resolved = path11.resolve(root, relative);
+  const rel = path11.relative(root, resolved);
+  if (rel === ".." || rel.startsWith(`..${path11.sep}`) || path11.isAbsolute(rel)) {
     return void 0;
   }
   return resolved;
@@ -784,7 +788,7 @@ function containedRefs(root, declared, file, warn) {
     if (typeof entry !== "string") {
       continue;
     }
-    if (containedPath(root, entry) === void 0) {
+    if (containedPath2(root, entry) === void 0) {
       warn(file, `skills path "${entry}" points outside the plugin directory`);
       continue;
     }
@@ -792,7 +796,7 @@ function containedRefs(root, declared, file, warn) {
   }
   return kept;
 }
-async function pluginMcpServers(root, manifest, plugin, warn) {
+async function pluginMcpServers2(root, manifest, plugin, warn) {
   const resolved = await resolveManifestRef(
     root,
     manifest.mcpServers,
@@ -815,43 +819,56 @@ async function pluginMcpServers(root, manifest, plugin, warn) {
     }
     entries.push(
       mcpEntry({
-        id: `${CLIENT}:plugin:${plugin}:${name}`,
+        id: `${CLIENT2}:plugin:${plugin}:${name}`,
         scope: "plugin",
         name,
         file: resolved.file,
         table,
-        plugin
+        plugin,
+        pluginRoot: root
       })
     );
   }
   return entries;
 }
 async function pluginHooks(root, manifest, plugin, warn) {
-  const manifestFile = path10.join(root, PLUGIN_MANIFEST);
+  const manifestFile = path11.join(root, PLUGIN_MANIFEST);
   const inline = asTable(manifest.hooks);
   if (inline) {
     const events = asTable(inline["hooks"]) ?? inline;
-    return hookEntries(events, manifestFile, "plugin", plugin, warn);
+    return hookEntries(events, manifestFile, "plugin", plugin, warn, root);
   }
   const declared = asString(manifest.hooks);
-  const file = containedPath(root, declared ?? "hooks.json");
+  const file = containedPath2(root, declared ?? "hooks.json");
   if (file === void 0) {
     warn(manifestFile, `hooks path "${declared ?? ""}" points outside the plugin directory`);
     return [];
   }
-  return readHookFile(file, "plugin", plugin, warn, declared !== void 0);
+  return readHookFile(file, "plugin", plugin, warn, declared !== void 0, root);
+}
+async function pluginApps(root, manifest, warn) {
+  const resolved = await resolveManifestRef(root, manifest.apps, warn);
+  if (!resolved) {
+    return 0;
+  }
+  const apps = asTable(resolved.value["apps"] ?? resolved.value);
+  if (!apps) {
+    warn(resolved.file, 'no "apps" object');
+    return 0;
+  }
+  return Object.keys(apps).length;
 }
 async function resolveManifestRef(root, ref, warn) {
   if (isTable(ref)) {
-    return { file: path10.join(root, PLUGIN_MANIFEST), value: ref };
+    return { file: path11.join(root, PLUGIN_MANIFEST), value: ref };
   }
   const relative = asString(ref);
   if (relative === void 0) {
     return void 0;
   }
-  const file = containedPath(root, relative);
+  const file = containedPath2(root, relative);
   if (file === void 0) {
-    warn(path10.join(root, PLUGIN_MANIFEST), `"${relative}" points outside the plugin directory`);
+    warn(path11.join(root, PLUGIN_MANIFEST), `"${relative}" points outside the plugin directory`);
     return void 0;
   }
   const read = await readJsonChecked(file);
@@ -869,7 +886,7 @@ async function resolveManifestRef(root, ref, warn) {
   return { file, value: read.value };
 }
 async function declaredPlugins(marketplaceDir, marketplace, installed, warn) {
-  const file = path10.join(marketplaceDir, MARKETPLACE_MANIFEST);
+  const file = path11.join(marketplaceDir, MARKETPLACE_MANIFEST);
   const read = await readJsonChecked(file);
   if (read.missing) {
     return [];
@@ -890,8 +907,8 @@ async function declaredPlugins(marketplaceDir, marketplace, installed, warn) {
       continue;
     }
     entries.push({
-      id: `${CLIENT}:plugin:${name}`,
-      client: CLIENT,
+      id: `${CLIENT2}:plugin:${name}`,
+      client: CLIENT2,
       scope: "plugin",
       name,
       marketplace,
@@ -918,8 +935,8 @@ async function setSkillDirectoryEnabled2(opts) {
   if (opts.skill === "" || opts.skill.startsWith(".") || opts.skill.includes("/") || opts.skill.includes("\\")) {
     throw new Error(`"${opts.skill}" is not a plain skill directory name`);
   }
-  const enabledDir = path10.join(paths.userSkills, opts.skill);
-  const disabledDir = path10.join(paths.userSkillsDisabled, opts.skill);
+  const enabledDir = path11.join(paths.userSkills, opts.skill);
+  const disabledDir = path11.join(paths.userSkillsDisabled, opts.skill);
   const inEnabled = await isDir2(enabledDir);
   const inDisabled = await isDir2(disabledDir);
   if (inEnabled && inDisabled) {
@@ -940,7 +957,7 @@ async function setSkillDirectoryEnabled2(opts) {
   if (opts.dryRun) {
     return { from, to, moved: false };
   }
-  await mkdir5(path10.dirname(to), { recursive: true });
+  await mkdir5(path11.dirname(to), { recursive: true });
   await rename4(from, to);
   return { from, to, moved: true };
 }
@@ -1355,7 +1372,7 @@ function asStringRecord2(value) {
   }
   return Object.keys(out).length > 0 ? out : void 0;
 }
-var CLIENT, PLUGIN_MANIFEST, MARKETPLACE_MANIFEST, SYSTEM_SKILLS, DEFAULT_PLUGIN_SKILLS, CODEX_CLI_TIMEOUT_MS, execFileAsync, IncompleteValue, BARE_KEY, SIMPLE_ESCAPES, INTEGER, RADIX_INTEGER, FLOAT;
+var CLIENT2, PLUGIN_MANIFEST, MARKETPLACE_MANIFEST, SYSTEM_SKILLS, DEFAULT_PLUGIN_SKILLS, CODEX_CLI_TIMEOUT_MS, execFileAsync, IncompleteValue, BARE_KEY, SIMPLE_ESCAPES, INTEGER, RADIX_INTEGER, FLOAT;
 var init_codex = __esm({
   "src/env/codex.ts"() {
     "use strict";
@@ -1363,9 +1380,9 @@ var init_codex = __esm({
     init_client_paths();
     init_skill_dirs();
     init_safe_io();
-    CLIENT = "codex";
-    PLUGIN_MANIFEST = path10.join(".codex-plugin", "plugin.json");
-    MARKETPLACE_MANIFEST = path10.join(".agents", "plugins", "marketplace.json");
+    CLIENT2 = "codex";
+    PLUGIN_MANIFEST = path11.join(".codex-plugin", "plugin.json");
+    MARKETPLACE_MANIFEST = path11.join(".agents", "plugins", "marketplace.json");
     SYSTEM_SKILLS = ".system";
     DEFAULT_PLUGIN_SKILLS = "./skills/";
     CODEX_CLI_TIMEOUT_MS = 15e3;
@@ -2376,559 +2393,6 @@ async function runAdaptCommand(args) {
   });
 }
 
-// src/env/probe.ts
-import { spawn } from "node:child_process";
-
-// src/env/tokens.ts
-var SEGMENT = /\s*(?:[A-Za-z]+|\d+|[^\sA-Za-z\d]+)|\s+/g;
-function estimateTokens(text, kind = "prose") {
-  if (!text) {
-    return 0;
-  }
-  let total = 0;
-  for (const [segment] of text.matchAll(SEGMENT)) {
-    total += segmentTokens(segment);
-  }
-  const factor = kind === "prose" ? 1 : kind === "json" ? 0.92 : 0.96;
-  return Math.max(1, Math.round(total * factor));
-}
-function segmentTokens(segment) {
-  const body = segment.replace(/^\s+/, "");
-  const hadLeadingSpace = body.length !== segment.length;
-  if (!body) {
-    return Math.max(1, Math.ceil(segment.length / 8));
-  }
-  if (/^\d+$/.test(body)) {
-    return Math.ceil(body.length / 3);
-  }
-  if (/^[A-Za-z]+$/.test(body)) {
-    const pieces = body.split(/(?=[A-Z])/).filter(Boolean);
-    if (pieces.length > 1) {
-      return pieces.reduce((sum, piece) => sum + wordPieces(piece), 0);
-    }
-    return wordPieces(body, hadLeadingSpace);
-  }
-  return Math.max(1, Math.ceil(body.length / 1.8));
-}
-function wordPieces(word, hadLeadingSpace = false) {
-  const length = word.length;
-  if (length <= (hadLeadingSpace ? 7 : 6)) {
-    return 1;
-  }
-  return Math.ceil(length / 5);
-}
-function estimateJsonTokens(value) {
-  return estimateTokens(JSON.stringify(value) ?? "", "json");
-}
-function formatTokens(count) {
-  if (count < 1e3) {
-    return String(count);
-  }
-  if (count < 1e4) {
-    return `${(count / 1e3).toFixed(1)}k`;
-  }
-  return `${Math.round(count / 1e3)}k`;
-}
-
-// src/env/probe.ts
-var DEFAULT_TIMEOUT_MS = 1e4;
-var DEFAULT_CONCURRENCY = 4;
-var KILL_GRACE_MS = 2e3;
-var PROTOCOL_VERSION = "2025-06-18";
-var INITIALIZE_ID = 1;
-var TOOLS_LIST_ID = 2;
-var STDERR_LIMIT = 4e3;
-var STDOUT_LIMIT = 16 * 1024 * 1024;
-var KILL_GROUP = process.platform !== "win32";
-async function probeMcpServer(entry, opts = {}) {
-  const started = Date.now();
-  const timeoutMs = positiveOr(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
-  const outcome = await runProbe(entry, timeoutMs, opts.env).catch(
-    (error2) => ({ ok: false, error: messageOf(error2), tools: [] })
-  );
-  const totalTokens = outcome.tools.reduce((sum, tool) => sum + tool.tokens, 0);
-  return {
-    id: entry.id,
-    server: entry.name,
-    ok: outcome.ok,
-    durationMs: Date.now() - started,
-    tools: outcome.tools,
-    totalTokens,
-    ...outcome.error !== void 0 ? { error: outcome.error } : {},
-    ...outcome.serverInfo ? { serverInfo: outcome.serverInfo } : {}
-  };
-}
-async function probeAll(entries, opts = {}) {
-  const limit = Math.max(1, Math.trunc(positiveOr(opts.concurrency, DEFAULT_CONCURRENCY)));
-  const results = new Array(entries.length);
-  let cursor = 0;
-  const worker = async () => {
-    for (; ; ) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= entries.length) {
-        return;
-      }
-      const entry = entries[index];
-      if (!entry) {
-        results[index] = {
-          id: `entry ${index}`,
-          server: `entry ${index}`,
-          ok: false,
-          error: "missing entry",
-          durationMs: 0,
-          tools: [],
-          totalTokens: 0
-        };
-        continue;
-      }
-      results[index] = await probeMcpServer(entry, {
-        ...opts.timeoutMs !== void 0 ? { timeoutMs: opts.timeoutMs } : {}
-      }).catch((error2) => ({
-        id: entry.id,
-        server: entry.name,
-        ok: false,
-        error: messageOf(error2),
-        durationMs: 0,
-        tools: [],
-        totalTokens: 0
-      }));
-    }
-  };
-  const workers = Array.from({ length: Math.min(limit, entries.length) }, () => worker());
-  await Promise.all(workers);
-  return results;
-}
-async function runProbe(entry, timeoutMs, envOverride) {
-  if (entry.transport !== "stdio") {
-    return { ok: false, error: "remote transports are not probed", tools: [] };
-  }
-  if (!entry.command) {
-    return { ok: false, error: "stdio server has no command", tools: [] };
-  }
-  const options = {
-    // Never 'inherit': a server that reads stdin would swallow the parent's.
-    stdio: ["pipe", "pipe", "pipe"],
-    // Its own process group, so the kill below reaps the whole tree. MCP
-    // servers are usually launched through `npx`/`uvx`, which fork the real
-    // server as a child; signalling only the launcher leaves that orphaned.
-    detached: KILL_GROUP,
-    ...entry.cwd ? { cwd: entry.cwd } : {},
-    env: { ...process.env, ...entry.env, ...envOverride }
-  };
-  let child;
-  try {
-    child = spawn(entry.command, entry.args ?? [], options);
-  } catch (error2) {
-    return { ok: false, error: messageOf(error2), tools: [] };
-  }
-  return converse(child, timeoutMs);
-}
-async function converse(child, timeoutMs) {
-  const waiters = /* @__PURE__ */ new Map();
-  let stderr = "";
-  let spawnError;
-  let exitCode = null;
-  let exitSignal = null;
-  child.stdin?.on("error", () => {
-  });
-  child.stderr?.on("error", () => {
-  });
-  child.stdout?.on("error", () => {
-  });
-  child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk) => {
-    if (stderr.length < STDERR_LIMIT) {
-      stderr = (stderr + chunk).slice(0, STDERR_LIMIT);
-    }
-  });
-  let buffer = "";
-  let overflowed = false;
-  child.stdout?.setEncoding("utf8");
-  child.stdout?.on("data", (chunk) => {
-    buffer += chunk;
-    let newline = buffer.indexOf("\n");
-    while (newline !== -1) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      if (line) {
-        deliver(line, waiters);
-      }
-      newline = buffer.indexOf("\n");
-    }
-    if (buffer.length > STDOUT_LIMIT) {
-      overflowed = true;
-      buffer = "";
-    }
-  });
-  const exited = new Promise((resolve) => {
-    child.once("exit", () => resolve());
-    child.once("error", () => resolve());
-  });
-  const closed = new Promise((resolve) => {
-    child.once("error", (error2) => {
-      spawnError ??= error2.message;
-      resolve();
-    });
-    child.once("close", (code, signal) => {
-      exitCode = code;
-      exitSignal = signal;
-      const tail = buffer.trim();
-      buffer = "";
-      if (tail) {
-        deliver(tail, waiters);
-      }
-      resolve();
-    });
-  });
-  const send = (message) => {
-    child.stdin?.write(`${JSON.stringify(message)}
-`);
-  };
-  const waitFor = (id) => new Promise((resolve) => {
-    waiters.set(id, resolve);
-  });
-  const conversation = (async () => {
-    const initPromise = waitFor(INITIALIZE_ID);
-    send({
-      jsonrpc: "2.0",
-      id: INITIALIZE_ID,
-      method: "initialize",
-      params: {
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: "yard", version: "1.0.0" }
-      }
-    });
-    const init = await initPromise;
-    if (init.error) {
-      return { ok: false, error: `initialize failed: ${rpcErrorText(init.error)}`, tools: [] };
-    }
-    const listPromise = waitFor(TOOLS_LIST_ID);
-    send({ jsonrpc: "2.0", method: "notifications/initialized" });
-    send({ jsonrpc: "2.0", id: TOOLS_LIST_ID, method: "tools/list", params: {} });
-    const listed = await listPromise;
-    const serverInfo = readServerInfo(init.result);
-    if (listed.error) {
-      return {
-        ok: false,
-        error: `tools/list failed: ${rpcErrorText(listed.error)}`,
-        tools: [],
-        ...serverInfo ? { serverInfo } : {}
-      };
-    }
-    return {
-      ok: true,
-      tools: readTools(listed.result),
-      ...serverInfo ? { serverInfo } : {}
-    };
-  })();
-  let timer;
-  const deadline = new Promise((resolve) => {
-    timer = setTimeout(() => resolve("timeout"), timeoutMs);
-  });
-  const died = closed.then(() => "closed");
-  let raced;
-  try {
-    raced = await Promise.race([conversation, deadline, died]);
-  } finally {
-    clearTimeout(timer);
-    await terminate(child, exited);
-    release(child);
-  }
-  if (raced === "timeout") {
-    return { ok: false, error: withStderr(note(`timed out after ${timeoutMs}ms`, overflowed), stderr), tools: [] };
-  }
-  if (raced === "closed") {
-    const reason = spawnError ?? exitDescription(exitCode, exitSignal);
-    return { ok: false, error: withStderr(note(reason, overflowed), stderr), tools: [] };
-  }
-  if (!raced.ok && raced.error !== void 0) {
-    return { ...raced, error: withStderr(raced.error, stderr) };
-  }
-  return raced;
-}
-async function terminate(child, exited) {
-  const running = child.pid !== void 0 && child.exitCode === null && child.signalCode === null;
-  if (!running) {
-    await settleWithin(exited, KILL_GRACE_MS);
-    return;
-  }
-  child.stdin?.end();
-  killTree(child, "SIGTERM");
-  const hardKill = setTimeout(() => killTree(child, "SIGKILL"), KILL_GRACE_MS);
-  hardKill.unref();
-  try {
-    await settleWithin(exited, KILL_GRACE_MS * 2);
-  } finally {
-    clearTimeout(hardKill);
-  }
-}
-function release(child) {
-  for (const stream of [child.stdin, child.stdout, child.stderr]) {
-    try {
-      stream?.destroy();
-    } catch {
-    }
-  }
-  child.unref();
-}
-function killTree(child, signal) {
-  const pid = child.pid;
-  if (pid === void 0) {
-    return;
-  }
-  if (KILL_GROUP && pid > 1) {
-    try {
-      process.kill(-pid, signal);
-      return;
-    } catch {
-    }
-  }
-  try {
-    child.kill(signal);
-  } catch {
-  }
-}
-async function settleWithin(promise, ms) {
-  let timer;
-  const bound = new Promise((resolve) => {
-    timer = setTimeout(resolve, ms);
-    timer.unref();
-  });
-  try {
-    await Promise.race([promise, bound]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-function note(message, overflowed) {
-  return overflowed ? `${message} (discarded oversized stdout)` : message;
-}
-function positiveOr(value, fallback) {
-  return value !== void 0 && Number.isFinite(value) && value > 0 ? value : fallback;
-}
-function deliver(line, waiters) {
-  let message;
-  try {
-    message = JSON.parse(line);
-  } catch {
-    return;
-  }
-  if (!isRecord(message)) {
-    return;
-  }
-  const id = correlationId(message.id);
-  if (id === void 0) {
-    return;
-  }
-  const waiter = waiters.get(id);
-  if (!waiter) {
-    return;
-  }
-  waiters.delete(id);
-  waiter(message);
-}
-function correlationId(value) {
-  if (typeof value === "number" && Number.isInteger(value)) {
-    return value;
-  }
-  if (typeof value === "string" && /^-?\d+$/.test(value)) {
-    return Number(value);
-  }
-  return void 0;
-}
-function readTools(result) {
-  if (!isRecord(result) || !Array.isArray(result.tools)) {
-    return [];
-  }
-  const tools = [];
-  for (const raw2 of result.tools) {
-    if (!isRecord(raw2) || typeof raw2.name !== "string") {
-      continue;
-    }
-    const name = raw2.name;
-    const description = typeof raw2.description === "string" ? raw2.description : "";
-    tools.push({ name, description, tokens: priceTool(name, description, raw2.inputSchema) });
-  }
-  return tools;
-}
-function priceTool(name, description, inputSchema) {
-  try {
-    return estimateJsonTokens({
-      name,
-      description,
-      ...inputSchema !== void 0 ? { inputSchema } : {}
-    });
-  } catch {
-    try {
-      return estimateJsonTokens({ name, description });
-    } catch {
-      return 0;
-    }
-  }
-}
-function readServerInfo(result) {
-  if (!isRecord(result) || !isRecord(result.serverInfo)) {
-    return void 0;
-  }
-  const info = result.serverInfo;
-  if (typeof info.name !== "string") {
-    return void 0;
-  }
-  return { name: info.name, version: typeof info.version === "string" ? info.version : "" };
-}
-function exitDescription(code, signal) {
-  if (signal) {
-    return `server exited on ${signal} before responding`;
-  }
-  if (code !== null) {
-    return `server exited with code ${code} before responding`;
-  }
-  return "server exited before responding";
-}
-function withStderr(message, stderr) {
-  const tail = stderr.trim().split("\n").slice(-5).join("\n").trim();
-  return tail ? `${message}: ${tail}` : message;
-}
-function rpcErrorText(error2) {
-  const text = typeof error2.message === "string" ? error2.message : JSON.stringify(error2);
-  return typeof error2.code === "number" ? `${text} (${error2.code})` : text;
-}
-function messageOf(error2) {
-  return error2 instanceof Error ? error2.message : String(error2);
-}
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// src/env/context.ts
-var DEFAULT_MAX_DESC_CHARS = 1536;
-var UNPROBED_MCP_TOKENS = 1200;
-async function buildContextReport(inventory, options = {}) {
-  const maxDescChars = options.maxDescChars ?? DEFAULT_MAX_DESC_CHARS;
-  const lines = [];
-  const notes = [];
-  for (const skill of inventory.skills) {
-    if (skill.visibility === "off" || skill.visibility === "user-invocable-only") {
-      continue;
-    }
-    const description = skill.visibility === "name-only" ? "" : skill.description.slice(0, maxDescChars);
-    const tokens = estimateTokens(`${skill.qualifiedName}: ${description}`);
-    lines.push({
-      id: skill.id,
-      client: skill.client,
-      kind: "skill",
-      label: skill.qualifiedName,
-      tokens,
-      measured: true,
-      ...skill.description.length > maxDescChars ? { detail: `description truncated at ${maxDescChars} chars` } : {},
-      // A plugin skill can be overridden via its `<plugin>:<skill>` key, but
-      // the natural switch — and the one that also drops the plugin's hooks
-      // and servers — is the plugin itself, so that is the remedy shown.
-      ...skill.scope === "plugin" && skill.plugin ? { remedy: pluginRemedy(skill.client, skill.plugin) } : skill.client === "claude" ? { remedy: `yard skill ${skill.qualifiedName} user-invocable-only` } : {}
-    });
-  }
-  const enabledServers = inventory.mcpServers.filter((server) => server.enabled);
-  let probes = [];
-  if (options.probe && enabledServers.length) {
-    probes = await probeAll(enabledServers, {
-      ...options.probeTimeoutMs !== void 0 ? { timeoutMs: options.probeTimeoutMs } : {}
-    });
-  }
-  for (const server of enabledServers) {
-    const probe = probes.find((result) => result.id === server.id);
-    const remedy = server.client === "codex" ? {} : { remedy: `yard mcp disable ${server.name}` };
-    if (probe?.ok) {
-      lines.push({
-        id: server.id,
-        client: server.client,
-        kind: "mcp",
-        label: server.name,
-        tokens: probe.totalTokens,
-        measured: true,
-        detail: `${probe.tools.length} tools`,
-        ...remedy
-      });
-      continue;
-    }
-    lines.push({
-      id: server.id,
-      client: server.client,
-      kind: "mcp",
-      label: server.name,
-      tokens: UNPROBED_MCP_TOKENS,
-      measured: false,
-      detail: probe?.error ?? (options.probe ? "probe failed" : "not probed \u2014 run with --probe for the real cost"),
-      ...remedy
-    });
-  }
-  if (!options.probe && enabledServers.length) {
-    notes.push(
-      `${enabledServers.length} MCP server(s) were estimated, not measured. Re-run with --probe to start them and read their real tool schemas.`
-    );
-  }
-  for (const agent of inventory.agents) {
-    lines.push({
-      id: agent.id,
-      client: agent.client,
-      kind: "agent",
-      label: agent.name,
-      tokens: estimateTokens(`${agent.name}: ${agent.description}`),
-      measured: true
-    });
-  }
-  for (const command of inventory.commands) {
-    lines.push({
-      id: command.id,
-      client: command.client,
-      kind: "command",
-      label: command.name,
-      tokens: estimateTokens(`${command.name}: ${command.description}`),
-      measured: true
-    });
-  }
-  for (const memory of inventory.memory) {
-    lines.push({
-      id: memory.id,
-      client: memory.client,
-      kind: "memory",
-      label: memory.name,
-      tokens: tokensFromBytes(memory.bytes),
-      measured: false,
-      detail: `${memory.bytes} bytes, loaded in full`
-    });
-  }
-  lines.sort((a, b) => b.tokens - a.tokens || a.id.localeCompare(b.id));
-  const byKind = { skill: 0, mcp: 0, agent: 0, command: 0, memory: 0 };
-  const byClient = {};
-  let total = 0;
-  for (const line of lines) {
-    byKind[line.kind] += line.tokens;
-    byClient[line.client] = (byClient[line.client] ?? 0) + line.tokens;
-    total += line.tokens;
-  }
-  return {
-    projectRoot: inventory.projectRoot,
-    clients: inventory.clients,
-    total,
-    byKind,
-    byClient,
-    lines,
-    probed: Boolean(options.probe),
-    notes
-  };
-}
-function tokensFromBytes(bytes) {
-  return Math.round(bytes / 4.1);
-}
-function pluginRemedy(client, plugin) {
-  return client === "claude" ? `yard plugin disable ${plugin}` : `${client} plugin remove ${plugin}`;
-}
-function topOffenders(report, limit = 10) {
-  return report.lines.filter((line) => line.remedy).slice(0, limit);
-}
-
 // src/env/claude.ts
 init_frontmatter();
 init_client_paths();
@@ -3058,6 +2522,11 @@ async function setSkillVisibility(opts) {
       `unknown skill visibility "${String(opts.visibility)}": expected one of ${SKILL_VISIBILITIES.join(", ")}`
     );
   }
+  if (opts.skill.includes(":")) {
+    throw new Error(
+      `"${opts.skill}" is a plugin skill; Claude Code does not apply skillOverrides to plugin skills \u2014 enable or disable its plugin instead`
+    );
+  }
   const file = claudeSettingsTarget(opts.scope ?? "user", opts.projectRoot);
   const settings = await readSettingsForWrite(file);
   const overrides = { ...asRecord(settings.skillOverrides) ?? {} };
@@ -3083,16 +2552,44 @@ async function setPluginEnabled(opts) {
   return writeSettings(file, settings, opts.dryRun === true);
 }
 async function setMcpEnabled(opts) {
-  const file = claudeSettingsTarget(opts.scope ?? "user", opts.projectRoot);
-  const settings = await readSettingsForWrite(file);
-  const enabled = new Set(asStringArray(settings.enabledMcpjsonServers) ?? []);
-  const disabled = new Set(asStringArray(settings.disabledMcpjsonServers) ?? []);
-  enabled.delete(opts.server);
-  disabled.delete(opts.server);
-  (opts.enabled ? enabled : disabled).add(opts.server);
-  applyList(settings, "enabledMcpjsonServers", enabled);
-  applyList(settings, "disabledMcpjsonServers", disabled);
-  return writeSettings(file, settings, opts.dryRun === true);
+  if (opts.origin === "plugin" && !opts.plugin) {
+    throw new Error(`setMcpEnabled: "${opts.server}" has origin "plugin" but no owning plugin was given`);
+  }
+  if (opts.origin === "project") {
+    const file = claudeSettingsTarget(opts.scope ?? "user", opts.projectRoot);
+    const settings = await readSettingsForWrite(file);
+    const enabled = new Set(asStringArray(settings.enabledMcpjsonServers) ?? []);
+    const disabled = new Set(asStringArray(settings.disabledMcpjsonServers) ?? []);
+    enabled.delete(opts.server);
+    disabled.delete(opts.server);
+    (opts.enabled ? enabled : disabled).add(opts.server);
+    applyList(settings, "enabledMcpjsonServers", enabled);
+    applyList(settings, "disabledMcpjsonServers", disabled);
+    return writeSettings(file, settings, opts.dryRun === true);
+  }
+  const key = opts.origin === "plugin" ? `plugin:${opts.plugin}:${opts.server}` : opts.server;
+  return setDisabledMcpServers(opts.projectRoot, key, !opts.enabled, opts.dryRun === true);
+}
+async function setDisabledMcpServers(projectRoot, key, disabled, dryRun) {
+  const file = claudePaths(projectRoot).globalConfig;
+  const root = await readSettingsForWrite(file);
+  const projects = { ...asRecord(root.projects) ?? {} };
+  const projectKey = path9.resolve(projectRoot);
+  const project = { ...asRecord(projects[projectKey]) ?? {} };
+  const list = new Set(asStringArray(project.disabledMcpServers) ?? []);
+  if (disabled) {
+    list.add(key);
+  } else {
+    list.delete(key);
+  }
+  if (list.size === 0) {
+    delete project.disabledMcpServers;
+  } else {
+    project.disabledMcpServers = [...list].sort();
+  }
+  projects[projectKey] = project;
+  root.projects = projects;
+  return writeSettings(file, root, dryRun);
 }
 async function setSkillDirectoryEnabled(opts) {
   const paths = claudePaths(opts.projectRoot);
@@ -3314,7 +2811,7 @@ async function scanSkillDir(dir, opts, settings, warnings, seen) {
     }
     const { data } = parseFrontmatter(raw2);
     const qualifiedName = opts.plugin ? `${opts.plugin}:${name}` : name;
-    const resolved = resolveVisibility(qualifiedName, name, opts, settings, skillDir);
+    const resolved = resolveVisibility(name, opts, settings, skillDir);
     entries.push({
       id: `claude:${opts.scope}:${qualifiedName}`,
       client: "claude",
@@ -3333,16 +2830,17 @@ async function scanSkillDir(dir, opts, settings, warnings, seen) {
   }
   return entries;
 }
-function resolveVisibility(qualifiedName, name, opts, settings, skillDir) {
+function resolveVisibility(name, opts, settings, skillDir) {
   if (opts.disabled) {
     return { visibility: "off", source: opts.disabledSource ?? path9.dirname(skillDir) };
   }
-  for (const key of opts.plugin ? [qualifiedName] : [name]) {
-    const override = settings.skillOverrides[key];
-    if (override) {
-      const source = settings.sources.skillOverrides[key];
-      return { visibility: override, ...source ? { source } : {} };
-    }
+  if (opts.plugin) {
+    return { visibility: "on" };
+  }
+  const override = settings.skillOverrides[name];
+  if (override) {
+    const source = settings.sources.skillOverrides[name];
+    return { visibility: override, ...source ? { source } : {} };
   }
   return { visibility: "on" };
 }
@@ -3673,8 +3171,10 @@ async function scanPlugins(projectRoot, settings, warnings) {
         continue;
       }
       const scope = toScope(install.scope);
-      const root = typeof install.installPath === "string" ? install.installPath : void 0;
+      const installPath = typeof install.installPath === "string" ? install.installPath : void 0;
+      const root = installPath ? await resolveNestedPluginRoot(installPath, name, marketplace, marketplaces, warnings) : void 0;
       const manifest = root ? await readManifest(path9.join(root, ".claude-plugin", "plugin.json"), warnings) : void 0;
+      const otherContributions = root ? await pluginOtherContributions(root, manifest, warnings) : 0;
       const discovered = root ? await discoverPluginComponents(
         root,
         {
@@ -3706,7 +3206,8 @@ async function scanPlugins(projectRoot, settings, warnings) {
         installed: root !== void 0 && await isDir2(root),
         skills: discovered.skills.length,
         hooks: discovered.hooks.length,
-        mcpServers: discovered.mcpServers.length
+        mcpServers: discovered.mcpServers.length,
+        ...otherContributions > 0 ? { otherContributions } : {}
       });
     }
   }
@@ -3832,8 +3333,103 @@ async function readManifest(file, warnings) {
     ...typeof record2.version === "string" ? { version: record2.version } : {},
     // A manifest may point `skills` at another directory or list explicit
     // skill paths. Kept unnarrowed; collectSkillDirs does the validation.
-    ...record2.skills !== void 0 ? { skills: record2.skills } : {}
+    ...record2.skills !== void 0 ? { skills: record2.skills } : {},
+    ...record2.lspServers !== void 0 ? { lspServers: record2.lspServers } : {},
+    ...record2.monitors !== void 0 ? { monitors: record2.monitors } : {},
+    ...record2.experimental !== void 0 ? { experimental: record2.experimental } : {}
   };
+}
+async function resolveNestedPluginRoot(installPath, name, marketplace, marketplaces, warnings) {
+  if (!marketplace) {
+    return installPath;
+  }
+  const installLocation = asRecord(marketplaces[marketplace])?.installLocation;
+  if (typeof installLocation !== "string") {
+    return installPath;
+  }
+  const manifestFile = path9.join(installLocation, ".claude-plugin", "marketplace.json");
+  const result = await readJsonFile(manifestFile);
+  if (result.missing || result.error !== void 0) {
+    return installPath;
+  }
+  const listed = asRecord(result.value)?.plugins;
+  if (!Array.isArray(listed)) {
+    return installPath;
+  }
+  const entry = listed.find((item) => asRecord(item)?.name === name);
+  const source = asRecord(asRecord(entry)?.source);
+  if (source?.source !== "git-subdir" || typeof source.path !== "string") {
+    return installPath;
+  }
+  const nested = path9.resolve(installPath, source.path);
+  const rel = path9.relative(installPath, nested);
+  if (rel === ".." || rel.startsWith(`..${path9.sep}`) || path9.isAbsolute(rel)) {
+    warnings.push({
+      client: "claude",
+      file: manifestFile,
+      message: `plugin "${name}" source.path "${source.path}" escapes the checkout \u2014 scanning ${installPath} instead`
+    });
+    return installPath;
+  }
+  return await isDir2(nested) ? nested : installPath;
+}
+async function pluginOtherContributions(root, manifest, warnings) {
+  const manifestFile = path9.join(root, ".claude-plugin", "plugin.json");
+  let count = 0;
+  const lsp = await resolvePluginManifestValue(root, manifestFile, manifest?.lspServers, ".lsp.json", warnings);
+  const lspTable = asRecord(lsp);
+  if (lspTable) {
+    count += Object.keys(lspTable).length;
+  }
+  const experimental = asRecord(manifest?.experimental);
+  const monitorsRef = experimental?.monitors ?? manifest?.monitors;
+  const monitors = await resolvePluginManifestValue(
+    root,
+    manifestFile,
+    monitorsRef,
+    path9.join("monitors", "monitors.json"),
+    warnings
+  );
+  if (Array.isArray(monitors)) {
+    count += monitors.length;
+  }
+  return count;
+}
+async function resolvePluginManifestValue(root, manifestFile, ref, defaultRelative, warnings) {
+  if (ref === void 0 || ref === null) {
+    return readOptionalPluginJson(path9.join(root, defaultRelative), warnings, false);
+  }
+  if (typeof ref === "string") {
+    const file = containedPluginPath(root, ref);
+    if (file === void 0) {
+      warnings.push({ client: "claude", file: manifestFile, message: `"${ref}" points outside the plugin directory` });
+      return void 0;
+    }
+    return readOptionalPluginJson(file, warnings, true);
+  }
+  return ref;
+}
+async function readOptionalPluginJson(file, warnings, required2) {
+  const result = await readJsonFile(file);
+  if (result.missing) {
+    if (required2) {
+      warnings.push({ client: "claude", file, message: "referenced by the plugin manifest but missing" });
+    }
+    return void 0;
+  }
+  if (result.error !== void 0) {
+    warnings.push({ client: "claude", file, message: result.error });
+    return void 0;
+  }
+  return result.value;
+}
+function containedPluginPath(root, relative) {
+  const resolved = path9.resolve(root, relative);
+  const rel = path9.relative(root, resolved);
+  if (rel === ".." || rel.startsWith(`..${path9.sep}`) || path9.isAbsolute(rel)) {
+    return void 0;
+  }
+  return resolved;
 }
 function splitPluginKey(key) {
   const at = key.lastIndexOf("@");
@@ -4027,16 +3623,13 @@ function asStringRecord(value) {
   return out;
 }
 
-// src/env/inventory.ts
-init_codex();
-
 // src/env/cursor.ts
 init_frontmatter();
 init_client_paths();
 init_skill_dirs();
 init_safe_io();
-import path11 from "node:path";
-var CLIENT2 = "cursor";
+import path10 from "node:path";
+var CLIENT = "cursor";
 var CURSOR_HOOK_EVENTS = [
   "sessionStart",
   "sessionEnd",
@@ -4244,25 +3837,25 @@ async function readCursorHooksFile(file, scope, warnings) {
   const out = [];
   for (const [event, value] of Object.entries(events)) {
     if (!isCursorHookEvent(event)) {
-      warnings.push({ client: CLIENT2, file, message: `unknown hook event: ${event}` });
+      warnings.push({ client: CLIENT, file, message: `unknown hook event: ${event}` });
     }
     const parsed = parseCursorEvent(value);
     for (const problem of parsed.problems) {
-      warnings.push({ client: CLIENT2, file, message: `${event}: ${problem}` });
+      warnings.push({ client: CLIENT, file, message: `${event}: ${problem}` });
     }
     out.push(...toHookEntries(event, parsed.defs, scope, file, void 0));
   }
   return out;
 }
-async function readPluginHooksFile(file, plugin, warnings) {
+async function readPluginHooksFile(file, plugin, warnings, pluginRoot) {
   const events = await readEventMap(file, warnings);
   const out = [];
   for (const [event, value] of Object.entries(events)) {
     const parsed = parseClaudeEvent(value);
     for (const problem of parsed.problems) {
-      warnings.push({ client: CLIENT2, file, message: `${event}: ${problem}` });
+      warnings.push({ client: CLIENT, file, message: `${event}: ${problem}` });
     }
-    out.push(...toHookEntries(event, parsed.defs, "plugin", file, plugin));
+    out.push(...toHookEntries(event, parsed.defs, "plugin", file, plugin, pluginRoot));
   }
   return out;
 }
@@ -4272,27 +3865,27 @@ async function readEventMap(file, warnings) {
     return {};
   }
   if (parsed.unreadable) {
-    warnings.push({ client: CLIENT2, file, message: "unreadable" });
+    warnings.push({ client: CLIENT, file, message: "unreadable" });
     return {};
   }
   if (parsed.error !== void 0) {
-    warnings.push({ client: CLIENT2, file, message: `invalid JSON: ${parsed.error}` });
+    warnings.push({ client: CLIENT, file, message: `invalid JSON: ${parsed.error}` });
     return {};
   }
   const root = asRecord2(parsed.value);
   const events = asRecord2(root?.hooks);
   if (!events) {
     if (!isEmptyRecord(parsed.value)) {
-      warnings.push({ client: CLIENT2, file, message: 'no "hooks" object' });
+      warnings.push({ client: CLIENT, file, message: 'no "hooks" object' });
     }
     return {};
   }
   return events;
 }
-function toHookEntries(event, defs, scope, file, plugin) {
+function toHookEntries(event, defs, scope, file, plugin, pluginRoot) {
   return defs.map((def, index) => ({
     id: `cursor:${scope}:${plugin ? `${plugin}:` : ""}${event}:${index}`,
-    client: CLIENT2,
+    client: CLIENT,
     scope,
     event,
     type: def.type,
@@ -4302,32 +3895,36 @@ function toHookEntries(event, defs, scope, file, plugin) {
     index,
     ...def.matcher !== void 0 ? { matcher: def.matcher } : {},
     ...def.timeout !== void 0 ? { timeout: def.timeout } : {},
-    ...plugin ? { plugin } : {}
+    ...plugin ? { plugin } : {},
+    ...pluginRoot !== void 0 ? { pluginRoot } : {}
   }));
 }
-async function readMcpFile2(file, scope, warnings) {
+async function readMcpFile2(file, scope, warnings, options = {}) {
   const parsed = await readJsonFile2(file);
   if (parsed.missing) {
+    if (options.required) {
+      warnings.push({ client: CLIENT, file, message: "referenced by the plugin manifest but missing" });
+    }
     return [];
   }
   if (parsed.unreadable) {
-    warnings.push({ client: CLIENT2, file, message: "unreadable" });
+    warnings.push({ client: CLIENT, file, message: "unreadable" });
     return [];
   }
   if (parsed.error !== void 0) {
-    warnings.push({ client: CLIENT2, file, message: `invalid JSON: ${parsed.error}` });
+    warnings.push({ client: CLIENT, file, message: `invalid JSON: ${parsed.error}` });
     return [];
   }
   const root = asRecord2(parsed.value);
   if (!root) {
-    warnings.push({ client: CLIENT2, file, message: "expected a JSON object" });
+    warnings.push({ client: CLIENT, file, message: "expected a JSON object" });
     return [];
   }
   const enabled = asRecord2(root.mcpServers);
   const disabled = asRecord2(root._disabledMcpServers);
   if (!enabled && !disabled) {
     if (Object.keys(root).length > 0) {
-      warnings.push({ client: CLIENT2, file, message: 'no "mcpServers" object' });
+      warnings.push({ client: CLIENT, file, message: 'no "mcpServers" object' });
     }
     return [];
   }
@@ -4335,7 +3932,7 @@ async function readMcpFile2(file, scope, warnings) {
   for (const [name, value] of Object.entries(disabled ?? {})) {
     if (enabled && name in enabled) {
       warnings.push({
-        client: CLIENT2,
+        client: CLIENT,
         file,
         message: `mcp server ${name} is in both mcpServers and _disabledMcpServers; using the enabled entry`
       });
@@ -4344,16 +3941,16 @@ async function readMcpFile2(file, scope, warnings) {
     parked[name] = value;
   }
   return [
-    ...mcpEntries(enabled ?? {}, file, scope, true, void 0, warnings),
-    ...mcpEntries(parked, file, scope, false, void 0, warnings)
+    ...mcpEntries(enabled ?? {}, file, scope, true, options.plugin, warnings, options.pluginRoot),
+    ...mcpEntries(parked, file, scope, false, options.plugin, warnings, options.pluginRoot)
   ];
 }
-function mcpEntries(servers, file, scope, enabled, plugin, warnings) {
+function mcpEntries(servers, file, scope, enabled, plugin, warnings, pluginRoot) {
   const out = [];
   for (const [name, value] of Object.entries(servers)) {
     const record2 = asRecord2(value);
     if (!record2) {
-      warnings.push({ client: CLIENT2, file, message: `mcp server ${name} is not an object` });
+      warnings.push({ client: CLIENT, file, message: `mcp server ${name} is not an object` });
       continue;
     }
     const args = Array.isArray(record2.args) ? record2.args.map((arg) => String(arg)) : void 0;
@@ -4361,7 +3958,7 @@ function mcpEntries(servers, file, scope, enabled, plugin, warnings) {
     const headers = stringMap(record2.headers);
     out.push({
       id: `cursor:${scope}:${plugin ? `${plugin}:` : ""}${name}`,
-      client: CLIENT2,
+      client: CLIENT,
       scope,
       name,
       transport: inferTransport(record2),
@@ -4374,9 +3971,46 @@ function mcpEntries(servers, file, scope, enabled, plugin, warnings) {
       ...typeof record2.url === "string" ? { url: record2.url } : {},
       ...headers ? { headers } : {},
       ...plugin ? { plugin } : {},
+      ...pluginRoot !== void 0 ? { pluginRoot } : {},
       // Cursor has no enabled flag; disabled servers are the ones Yard parked
       // under `_disabledMcpServers`, so the file itself is the source.
       ...enabled ? {} : { enabledSource: file }
+    });
+  }
+  return out;
+}
+async function pluginMcpServers(root, manifest, manifestFile, name, warnings) {
+  const declared = manifest.mcpServers;
+  if (declared === void 0 || declared === null) {
+    return readMcpFile2(path10.join(root, "mcp.json"), "plugin", warnings, { plugin: name, pluginRoot: root });
+  }
+  const refs = Array.isArray(declared) ? declared : [declared];
+  const out = [];
+  for (const ref of refs) {
+    const inline = asRecord2(ref);
+    if (inline) {
+      out.push(...mcpEntries(inline, manifestFile, "plugin", true, name, warnings, root));
+      continue;
+    }
+    if (typeof ref === "string") {
+      const file = containedPath(root, ref);
+      if (file === void 0) {
+        warnings.push({
+          client: CLIENT,
+          file: manifestFile,
+          message: `mcpServers path "${ref}" points outside the plugin directory`
+        });
+        continue;
+      }
+      out.push(
+        ...await readMcpFile2(file, "plugin", warnings, { plugin: name, pluginRoot: root, required: true })
+      );
+      continue;
+    }
+    warnings.push({
+      client: CLIENT,
+      file: manifestFile,
+      message: "mcpServers entry is neither a path nor an object"
     });
   }
   return out;
@@ -4396,23 +4030,23 @@ function inferTransport(record2) {
 }
 async function readSkillsDir(dir, scope, plugin, warnings, skillDirs) {
   const out = [];
-  const dirs = skillDirs ?? (await listDirs(dir)).map((name) => path11.join(dir, name));
+  const dirs = skillDirs ?? (await listDirs(dir)).map((name) => path10.join(dir, name));
   for (const skillDir of dirs) {
-    const name = path11.basename(skillDir);
-    const file = path11.join(skillDir, "SKILL.md");
+    const name = path10.basename(skillDir);
+    const file = path10.join(skillDir, "SKILL.md");
     if (!await isFile2(file)) {
       continue;
     }
     const raw2 = await readText(file);
     if (raw2 === void 0) {
-      warnings.push({ client: CLIENT2, file, message: "unreadable" });
+      warnings.push({ client: CLIENT, file, message: "unreadable" });
       continue;
     }
     const { data } = parseFrontmatter(raw2);
     const qualifiedName = plugin ? `${plugin}:${name}` : name;
     out.push({
       id: `cursor:${scope}:${qualifiedName}`,
-      client: CLIENT2,
+      client: CLIENT,
       scope,
       name,
       qualifiedName,
@@ -4430,17 +4064,17 @@ async function readSkillsDir(dir, scope, plugin, warnings, skillDirs) {
 async function readMarkdownDir(dir, scope, kind, plugin, warnings) {
   const out = [];
   for (const fileName of await listFiles(dir, [".md", ".mdc"])) {
-    const file = path11.join(dir, fileName);
+    const file = path10.join(dir, fileName);
     const raw2 = await readText(file);
     if (raw2 === void 0) {
-      warnings.push({ client: CLIENT2, file, message: "unreadable" });
+      warnings.push({ client: CLIENT, file, message: "unreadable" });
       continue;
     }
     const { data } = parseFrontmatter(raw2);
     const name = fileName.replace(/\.mdc?$/, "");
     out.push({
       id: `cursor:${scope}:${kind}:${plugin ? `${plugin}:` : ""}${name}`,
-      client: CLIENT2,
+      client: CLIENT,
       scope,
       name,
       description: data.description ?? "",
@@ -4454,16 +4088,16 @@ async function readMarkdownDir(dir, scope, kind, plugin, warnings) {
 async function readRulesDir(dir, scope, warnings) {
   const out = [];
   for (const fileName of await listFiles(dir, [".mdc", ".md"])) {
-    const file = path11.join(dir, fileName);
+    const file = path10.join(dir, fileName);
     const raw2 = await readText(file);
     if (raw2 === void 0) {
-      warnings.push({ client: CLIENT2, file, message: "unreadable" });
+      warnings.push({ client: CLIENT, file, message: "unreadable" });
       continue;
     }
     const { data } = parseFrontmatter(raw2);
     if (data.description === void 0 && data.alwaysApply === void 0 && data.globs === void 0) {
       warnings.push({
-        client: CLIENT2,
+        client: CLIENT,
         file,
         message: "rule has no description, globs, or alwaysApply frontmatter"
       });
@@ -4477,10 +4111,10 @@ async function readMemoryFile(file, scope) {
   return raw2 === void 0 ? void 0 : memoryEntry(file, scope, raw2);
 }
 function memoryEntry(file, scope, raw2) {
-  const name = path11.basename(file);
+  const name = path10.basename(file);
   return {
     id: `cursor:${scope}:memory:${name}`,
-    client: CLIENT2,
+    client: CLIENT,
     scope,
     name,
     file,
@@ -4489,9 +4123,9 @@ function memoryEntry(file, scope, raw2) {
 }
 async function readPlugins(cacheDir, scan) {
   for (const marketplace of await listDirs(cacheDir)) {
-    const marketplaceDir = path11.join(cacheDir, marketplace);
+    const marketplaceDir = path10.join(cacheDir, marketplace);
     for (const pluginName of await listDirs(marketplaceDir)) {
-      const versionsDir = path11.join(marketplaceDir, pluginName);
+      const versionsDir = path10.join(marketplaceDir, pluginName);
       const shas = await listDirs(versionsDir);
       const sha = shas[shas.length - 1];
       if (sha === void 0) {
@@ -4499,32 +4133,32 @@ async function readPlugins(cacheDir, scan) {
       }
       if (shas.length > 1) {
         scan.warnings.push({
-          client: CLIENT2,
+          client: CLIENT,
           file: versionsDir,
           message: `${shas.length} cached versions; scanning ${sha}`
         });
       }
-      await readPlugin2(path11.join(versionsDir, sha), marketplace, pluginName, scan);
+      await readPlugin(path10.join(versionsDir, sha), marketplace, pluginName, scan);
     }
   }
 }
-async function readPlugin2(root, marketplace, dirName, scan) {
-  const manifestFile = path11.join(root, ".cursor-plugin", "plugin.json");
+async function readPlugin(root, marketplace, dirName, scan) {
+  const manifestFile = path10.join(root, ".cursor-plugin", "plugin.json");
   const parsed = await readJsonFile2(manifestFile);
   if (parsed.missing) {
     return;
   }
   if (parsed.unreadable) {
-    scan.warnings.push({ client: CLIENT2, file: manifestFile, message: "unreadable" });
+    scan.warnings.push({ client: CLIENT, file: manifestFile, message: "unreadable" });
     return;
   }
   if (parsed.error !== void 0) {
-    scan.warnings.push({ client: CLIENT2, file: manifestFile, message: `invalid JSON: ${parsed.error}` });
+    scan.warnings.push({ client: CLIENT, file: manifestFile, message: `invalid JSON: ${parsed.error}` });
     return;
   }
   const manifest = asRecord2(parsed.value);
   if (!manifest) {
-    scan.warnings.push({ client: CLIENT2, file: manifestFile, message: "expected a JSON object" });
+    scan.warnings.push({ client: CLIENT, file: manifestFile, message: "expected a JSON object" });
     return;
   }
   const name = typeof manifest.name === "string" && manifest.name ? manifest.name : dirName;
@@ -4534,13 +4168,13 @@ async function readPlugin2(root, marketplace, dirName, scan) {
       return true;
     }
     scan.warnings.push({
-      client: CLIENT2,
+      client: CLIENT,
       file: manifestFile,
       message: `skills path escapes the plugin root: ${dir}`
     });
     return false;
   });
-  const skills = await readSkillsDir(path11.join(root, "skills"), "plugin", name, scan.warnings, skillDirs);
+  const skills = await readSkillsDir(path10.join(root, "skills"), "plugin", name, scan.warnings, skillDirs);
   const agents = [];
   for (const dir of manifestDirs(root, manifest.agents, "agents", manifestFile, scan.warnings)) {
     agents.push(...await readMarkdownDir(dir, "plugin", "agent", name, scan.warnings));
@@ -4549,9 +4183,13 @@ async function readPlugin2(root, marketplace, dirName, scan) {
   for (const dir of manifestDirs(root, manifest.commands, "commands", manifestFile, scan.warnings)) {
     commands.push(...await readMarkdownDir(dir, "plugin", "command", name, scan.warnings));
   }
-  const hooks = await readPluginHooksFile(path11.join(root, "hooks", "hooks.json"), name, scan.warnings);
-  const inlineMcp = asRecord2(manifest.mcpServers);
-  const mcpServers = inlineMcp ? mcpEntries(inlineMcp, manifestFile, "plugin", true, name, scan.warnings) : [];
+  const hooks = await readPluginHooksFile(
+    path10.join(root, "hooks", "hooks.json"),
+    name,
+    scan.warnings,
+    root
+  );
+  const mcpServers = await pluginMcpServers(root, manifest, manifestFile, name, scan.warnings);
   scan.skills.push(...skills);
   scan.agents.push(...agents);
   scan.commands.push(...commands);
@@ -4559,7 +4197,7 @@ async function readPlugin2(root, marketplace, dirName, scan) {
   scan.mcpServers.push(...mcpServers);
   scan.plugins.push({
     id: `cursor:user:${name}`,
-    client: CLIENT2,
+    client: CLIENT,
     scope: "user",
     name,
     marketplace,
@@ -4579,13 +4217,13 @@ function manifestDirs(root, value, fallback, manifestFile, warnings) {
   const out = [];
   for (const item of raw2) {
     if (typeof item !== "string" || !item) {
-      warnings.push({ client: CLIENT2, file: manifestFile, message: `${fallback} entry is not a path` });
+      warnings.push({ client: CLIENT, file: manifestFile, message: `${fallback} entry is not a path` });
       continue;
     }
-    const resolved = path11.resolve(root, item);
+    const resolved = path10.resolve(root, item);
     if (!within(root, resolved)) {
       warnings.push({
-        client: CLIENT2,
+        client: CLIENT,
         file: manifestFile,
         message: `${fallback} path escapes the plugin root: ${item}`
       });
@@ -4603,12 +4241,12 @@ function declaredSkillPaths(root, value, manifestFile, warnings) {
   const out = [];
   for (const item of items) {
     if (typeof item !== "string" || !item) {
-      warnings.push({ client: CLIENT2, file: manifestFile, message: "skills entry is not a path" });
+      warnings.push({ client: CLIENT, file: manifestFile, message: "skills entry is not a path" });
       continue;
     }
-    if (!within(root, path11.resolve(root, item))) {
+    if (!within(root, path10.resolve(root, item))) {
       warnings.push({
-        client: CLIENT2,
+        client: CLIENT,
         file: manifestFile,
         message: `skills path escapes the plugin root: ${item}`
       });
@@ -4641,7 +4279,11 @@ function stripBom2(raw2) {
   return raw2.charCodeAt(0) === 65279 ? raw2.slice(1) : raw2;
 }
 function within(root, target) {
-  return target === root || target.startsWith(root + path11.sep);
+  return target === root || target.startsWith(root + path10.sep);
+}
+function containedPath(root, relative) {
+  const resolved = path10.resolve(root, relative);
+  return within(root, resolved) ? resolved : void 0;
 }
 function isEmptyRecord(value) {
   const record2 = asRecord2(value);
@@ -4668,7 +4310,7 @@ async function guard(warnings, file, run) {
     await run();
   } catch (error2) {
     warnings.push({
-      client: CLIENT2,
+      client: CLIENT,
       file,
       message: error2 instanceof Error ? error2.message : String(error2)
     });
@@ -4676,6 +4318,7 @@ async function guard(warnings, file, run) {
 }
 
 // src/env/inventory.ts
+init_codex();
 async function scanEnvironment(projectRoot, options = {}) {
   const wanted = options.clients;
   const inventory = emptyInventory(projectRoot);
@@ -4745,9 +4388,961 @@ function duplicateSkills(inventory) {
   return [...byName.entries()].filter(([, ids]) => ids.length > 1).map(([name, ids]) => ({ name, ids })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// src/env/actions.ts
+function skillActionBlocked(entry) {
+  if (entry.scope === "plugin") {
+    return `plugin skill \u2014 enable or disable the "${entry.plugin}" plugin instead of switching it alone`;
+  }
+  if (entry.client === "cursor") {
+    return "cursor has no skill visibility setting \u2014 move the directory by hand";
+  }
+  return void 0;
+}
+function pluginActionBlocked(entry) {
+  if (entry.client !== "claude") {
+    return `only Claude Code stores plugin enablement in settings \u2014 use \`${entry.client} plugin add/remove\` instead`;
+  }
+  return void 0;
+}
+function mcpActionBlocked(entry) {
+  if (entry.scope === "plugin") {
+    if (entry.client === "cursor") {
+      return `plugin-contributed MCP server \u2014 Cursor manages it through the "${entry.plugin}" plugin, not ~/.cursor/mcp.json`;
+    }
+    if (entry.client === "codex") {
+      return `plugin-contributed MCP server, not a ~/.codex/config.toml entry \u2014 enable or disable the "${entry.plugin}" plugin instead`;
+    }
+    return void 0;
+  }
+  if (entry.client === "codex") {
+    return "codex owns config.toml \u2014 use `codex mcp add/remove` so its formatting survives";
+  }
+  return void 0;
+}
+async function setSkillVisibility2(opts) {
+  const { entry, inventory } = await resolveEntry(
+    opts,
+    `skill "${opts.skill}"`,
+    (inv) => inv.skills,
+    (skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill
+  );
+  const client = entry.client;
+  if (client !== "claude") {
+    const enabled = opts.visibility === "on";
+    return setSkillEnabled({ ...opts, id: entry.id, enabled, client, inventory });
+  }
+  if (skillActionBlocked(entry)) {
+    throw new Error(
+      `"${entry.qualifiedName}" is a plugin skill; Claude Code does not apply skillOverrides to plugin skills \u2014 enable or disable the "${entry.plugin}" plugin instead`
+    );
+  }
+  const result = await setSkillVisibility({
+    skill: entry.qualifiedName,
+    visibility: opts.visibility,
+    projectRoot: opts.projectRoot,
+    ...opts.scope ? { scope: opts.scope } : {},
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  });
+  if (opts.dryRun !== true) {
+    await verifySkillVisibility(opts.projectRoot, entry.id, opts.visibility);
+  }
+  return {
+    changed: result.changed,
+    file: result.file,
+    ...result.backup ? { backup: result.backup } : {},
+    dryRun: opts.dryRun === true,
+    detail: result.changed ? `${entry.qualifiedName} \u2192 ${opts.visibility} in ${result.file}` : `${entry.qualifiedName} was already ${opts.visibility}`
+  };
+}
+async function setSkillEnabled(opts) {
+  const { entry } = await resolveEntry(
+    opts,
+    `skill "${opts.skill}"`,
+    (inv) => inv.skills,
+    (skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill
+  );
+  const client = entry.client;
+  if (entry.scope === "plugin") {
+    throw new Error(
+      `"${entry.qualifiedName}" is a plugin skill; ${client} has no per-skill switch for it \u2014 enable or disable the "${entry.plugin}" plugin instead`
+    );
+  }
+  const move = client === "claude" ? await setSkillDirectoryEnabled({
+    skill: entry.qualifiedName,
+    enabled: opts.enabled,
+    projectRoot: opts.projectRoot,
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  }) : client === "codex" ? await (await Promise.resolve().then(() => (init_codex(), codex_exports))).setSkillDirectoryEnabled({
+    skill: entry.qualifiedName,
+    enabled: opts.enabled,
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  }) : void 0;
+  if (!move) {
+    throw new Error(`"${entry.qualifiedName}": ${skillActionBlocked(entry) ?? "no enable/disable lever for this client"}`);
+  }
+  if (opts.dryRun !== true) {
+    await verifySkillEnabled(opts.projectRoot, entry.id, opts.enabled);
+  }
+  return {
+    changed: move.moved,
+    file: move.to,
+    dryRun: opts.dryRun === true,
+    detail: move.moved ? `moved ${move.from} \u2192 ${move.to}` : opts.dryRun ? `would move ${move.from} \u2192 ${move.to}` : `${entry.qualifiedName} was already ${opts.enabled ? "enabled" : "disabled"}`
+  };
+}
+async function setPluginEnabled2(opts) {
+  const { entry } = await resolveEntry(
+    opts,
+    `plugin "${opts.plugin}"`,
+    (inv) => inv.plugins,
+    (plugin) => plugin.qualifiedName === opts.plugin || plugin.name === opts.plugin
+  );
+  const client = entry.client;
+  if (pluginActionBlocked(entry)) {
+    throw new Error(
+      `Only Claude Code stores plugin enablement in settings. Use \`${client} plugin ${opts.enabled ? "add" : "remove"} ${entry.qualifiedName}\`.`
+    );
+  }
+  const result = await setPluginEnabled({
+    plugin: entry.qualifiedName,
+    enabled: opts.enabled,
+    projectRoot: opts.projectRoot,
+    ...opts.scope ? { scope: opts.scope } : {},
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  });
+  if (opts.dryRun !== true) {
+    await verifyPluginEnabled(opts.projectRoot, entry.id, opts.enabled);
+  }
+  return {
+    changed: result.changed,
+    file: result.file,
+    ...result.backup ? { backup: result.backup } : {},
+    dryRun: opts.dryRun === true,
+    detail: result.changed ? `${entry.qualifiedName} ${opts.enabled ? "enabled" : "disabled"} in ${result.file}` : `${entry.qualifiedName} was already ${opts.enabled ? "enabled" : "disabled"}`
+  };
+}
+async function setMcpEnabled2(opts) {
+  const { entry } = await resolveEntry(
+    opts,
+    `mcp server "${opts.server}"`,
+    (inv) => inv.mcpServers,
+    (server) => server.name === opts.server
+  );
+  const client = entry.client;
+  if (client === "cursor") {
+    if (mcpActionBlocked(entry)) {
+      throw new Error(
+        `"${entry.name}" is a plugin-contributed MCP server; Cursor manages plugin servers through the plugin itself, not ~/.cursor/mcp.json \u2014 ${opts.enabled ? "enable" : "disable"} the "${entry.plugin}" plugin instead`
+      );
+    }
+    const result2 = await setMcpServerEnabled({
+      server: opts.server,
+      enabled: opts.enabled,
+      scope: entry.scope === "project" ? "project" : "user",
+      projectRoot: opts.projectRoot,
+      ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+    });
+    if (opts.dryRun !== true) {
+      await verifyMcpEnabled(opts.projectRoot, entry.id, opts.enabled);
+    }
+    return {
+      changed: result2.changed,
+      file: result2.file,
+      ...result2.backup ? { backup: result2.backup } : {},
+      dryRun: opts.dryRun === true,
+      detail: result2.changed ? `${opts.server} ${opts.enabled ? "restored to" : "parked out of"} mcpServers in ${result2.file}` : `${opts.server} was already ${opts.enabled ? "enabled" : "disabled"}`
+    };
+  }
+  if (client === "codex") {
+    if (entry.scope === "plugin") {
+      throw new Error(
+        `"${entry.name}" is a plugin-contributed MCP server, not a ~/.codex/config.toml entry \u2014 \`codex mcp remove\` would report no such server. ${opts.enabled ? "Enable" : "Disable"} the "${entry.plugin}" plugin instead.`
+      );
+    }
+    throw new Error(
+      `Codex owns ~/.codex/config.toml. Use \`codex mcp ${opts.enabled ? "add" : "remove"} ${opts.server}\` so its formatting and comments survive.`
+    );
+  }
+  const result = await setMcpEnabled({
+    server: opts.server,
+    enabled: opts.enabled,
+    origin: entry.scope,
+    ...entry.plugin ? { plugin: entry.plugin } : {},
+    projectRoot: opts.projectRoot,
+    ...opts.scope ? { scope: opts.scope } : {},
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  });
+  if (opts.dryRun !== true) {
+    await verifyMcpEnabled(opts.projectRoot, entry.id, opts.enabled);
+  }
+  return {
+    changed: result.changed,
+    file: result.file,
+    ...result.backup ? { backup: result.backup } : {},
+    dryRun: opts.dryRun === true,
+    detail: result.changed ? `${opts.server} ${describeMcpChange(entry.scope, opts.enabled)} in ${result.file}` : `${opts.server} was already ${opts.enabled ? "enabled" : "disabled"}`
+  };
+}
+function describeMcpChange(scope, enabled) {
+  if (scope === "project") {
+    return enabled ? "approved" : "rejected";
+  }
+  return enabled ? "enabled" : "disabled";
+}
+async function verifySkillVisibility(projectRoot, id, visibility) {
+  const rescanned = await scanEnvironment(projectRoot);
+  const entry = rescanned.skills.find((skill) => skill.id === id);
+  if (entry?.visibility !== visibility) {
+    throw new Error(
+      `wrote the setting, but rescanning found "${id}" ${entry ? `still ${entry.visibility}` : "gone entirely"} instead of ${visibility} \u2014 the target client likely does not read that setting for this skill`
+    );
+  }
+}
+async function verifySkillEnabled(projectRoot, id, enabled) {
+  const rescanned = await scanEnvironment(projectRoot);
+  const entry = rescanned.skills.find((skill) => skill.id === id);
+  const isEnabled = entry !== void 0 && entry.visibility !== "off";
+  if (isEnabled !== enabled) {
+    throw new Error(
+      `moved the directory, but rescanning found "${id}" still ${isEnabled ? "enabled" : "disabled"} \u2014 check for a duplicate elsewhere on the skill path`
+    );
+  }
+}
+async function verifyPluginEnabled(projectRoot, id, enabled) {
+  const rescanned = await scanEnvironment(projectRoot);
+  const entry = rescanned.plugins.find((plugin) => plugin.id === id);
+  if ((entry?.enabled ?? false) !== enabled) {
+    throw new Error(
+      `wrote the setting, but rescanning found "${id}" still ${entry?.enabled ? "enabled" : "disabled"} \u2014 another settings layer may be overriding it`
+    );
+  }
+}
+async function verifyMcpEnabled(projectRoot, id, enabled) {
+  const rescanned = await scanEnvironment(projectRoot);
+  const entry = rescanned.mcpServers.find((server) => server.id === id);
+  if ((entry?.enabled ?? false) !== enabled) {
+    throw new Error(
+      `wrote the setting, but rescanning found "${id}" still ${entry?.enabled ? "enabled" : "disabled"} \u2014 the target client likely reads a different setting for this server`
+    );
+  }
+}
+async function resolveEntry(opts, subject, entriesOf, matchesName) {
+  const inventory = opts.inventory ?? await scanEnvironment(opts.projectRoot);
+  const entries = entriesOf(inventory);
+  if (opts.id !== void 0) {
+    const entry = entries.find((item) => item.id === opts.id);
+    if (!entry) {
+      throw new Error(`${subject} \u2014 no item with id "${opts.id}"; run \`yard scan\` to see current ids`);
+    }
+    if (opts.client && entry.client !== opts.client) {
+      throw new Error(`id "${opts.id}" belongs to ${entry.client}, not ${opts.client}`);
+    }
+    return { entry, inventory };
+  }
+  const found = entries.filter(matchesName);
+  const clients = [...new Set(found.map((item) => item.client))];
+  const scoped = opts.client ? found.filter((item) => item.client === opts.client) : found;
+  if (scoped.length === 1 && scoped[0]) {
+    return { entry: scoped[0], inventory };
+  }
+  if (opts.client) {
+    if (scoped.length > 1) {
+      throw new Error(
+        `${subject} is ambiguous within ${opts.client} (matched ${scoped.map((item) => item.id).join(", ")}) \u2014 pass its id instead`
+      );
+    }
+    throw new Error(
+      clients.length ? `${subject} not found in ${opts.client} \u2014 it is in ${clients.join(", ")}` : `${subject} not found in ${opts.client} \u2014 run \`yard scan\` to see what is there`
+    );
+  }
+  if (found.length === 0) {
+    throw new Error(`${subject} not found in any installed client \u2014 run \`yard scan\` to see what is there`);
+  }
+  throw new Error(
+    `${subject} is ambiguous across ${clients.join(", ")} \u2014 set client to one of them, or pass its id (matched ${found.map((item) => item.id).join(", ")})`
+  );
+}
+
+// src/env/probe.ts
+import { spawn } from "node:child_process";
+import path12 from "node:path";
+
+// src/env/shell-words.ts
+function splitShellWords(command) {
+  const words = [];
+  let current = "";
+  let hasCurrent = false;
+  let i = 0;
+  while (i < command.length) {
+    const char = command[i];
+    if (char === " " || char === "	" || char === "\n" || char === "\r") {
+      if (hasCurrent) {
+        words.push(current);
+        current = "";
+        hasCurrent = false;
+      }
+      i += 1;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      hasCurrent = true;
+      const quote = char;
+      i += 1;
+      while (i < command.length && command[i] !== quote) {
+        const next = command[i];
+        if (quote === '"' && next === "\\" && i + 1 < command.length) {
+          const escaped = command[i + 1];
+          if (escaped === '"' || escaped === "\\" || escaped === "$") {
+            current += escaped;
+            i += 2;
+            continue;
+          }
+        }
+        current += next;
+        i += 1;
+      }
+      i += 1;
+      continue;
+    }
+    hasCurrent = true;
+    current += char;
+    i += 1;
+  }
+  if (hasCurrent) {
+    words.push(current);
+  }
+  return words;
+}
+function expandVariables(text, vars) {
+  return text.replace(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g,
+    (match2, braced, bare) => {
+      const name = braced ?? bare ?? "";
+      const value = vars[name];
+      return value !== void 0 ? value : match2;
+    }
+  );
+}
+function isFullyExpanded(text) {
+  return !text.includes("$");
+}
+function pathVariables(opts) {
+  const vars = {};
+  if (opts.projectRoot !== void 0) {
+    vars.CLAUDE_PROJECT_DIR = opts.projectRoot;
+    vars.PROJECT_ROOT = opts.projectRoot;
+  }
+  if (opts.pluginRoot !== void 0) {
+    vars.CLAUDE_PLUGIN_ROOT = opts.pluginRoot;
+    vars.PLUGIN_ROOT = opts.pluginRoot;
+  }
+  return vars;
+}
+
+// src/env/tokens.ts
+var SEGMENT = /\s*(?:[A-Za-z]+|\d+|[^\sA-Za-z\d]+)|\s+/g;
+function estimateTokens(text, kind = "prose") {
+  if (!text) {
+    return 0;
+  }
+  let total = 0;
+  for (const [segment] of text.matchAll(SEGMENT)) {
+    total += segmentTokens(segment);
+  }
+  const factor = kind === "prose" ? 1 : kind === "json" ? 0.92 : 0.96;
+  return Math.max(1, Math.round(total * factor));
+}
+function segmentTokens(segment) {
+  const body = segment.replace(/^\s+/, "");
+  const hadLeadingSpace = body.length !== segment.length;
+  if (!body) {
+    return Math.max(1, Math.ceil(segment.length / 8));
+  }
+  if (/^\d+$/.test(body)) {
+    return Math.ceil(body.length / 3);
+  }
+  if (/^[A-Za-z]+$/.test(body)) {
+    const pieces = body.split(/(?=[A-Z])/).filter(Boolean);
+    if (pieces.length > 1) {
+      return pieces.reduce((sum, piece) => sum + wordPieces(piece), 0);
+    }
+    return wordPieces(body, hadLeadingSpace);
+  }
+  return Math.max(1, Math.ceil(body.length / 1.8));
+}
+function wordPieces(word, hadLeadingSpace = false) {
+  const length = word.length;
+  if (length <= (hadLeadingSpace ? 7 : 6)) {
+    return 1;
+  }
+  return Math.ceil(length / 5);
+}
+function estimateJsonTokens(value) {
+  return estimateTokens(JSON.stringify(value) ?? "", "json");
+}
+function formatTokens(count) {
+  if (count < 1e3) {
+    return String(count);
+  }
+  if (count < 1e4) {
+    return `${(count / 1e3).toFixed(1)}k`;
+  }
+  return `${Math.round(count / 1e3)}k`;
+}
+
+// src/env/probe.ts
+var DEFAULT_TIMEOUT_MS = 1e4;
+var DEFAULT_CONCURRENCY = 4;
+var KILL_GRACE_MS = 2e3;
+var PROTOCOL_VERSION = "2025-06-18";
+var INITIALIZE_ID = 1;
+var TOOLS_LIST_ID = 2;
+var STDERR_LIMIT = 4e3;
+var STDOUT_LIMIT = 16 * 1024 * 1024;
+var KILL_GROUP = process.platform !== "win32";
+async function probeMcpServer(entry, opts = {}) {
+  const started = Date.now();
+  const timeoutMs = positiveOr(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
+  const outcome = await runProbe(entry, timeoutMs, opts.env, opts.projectRoot).catch(
+    (error2) => ({ ok: false, error: messageOf(error2), tools: [] })
+  );
+  const totalTokens = outcome.tools.reduce((sum, tool) => sum + tool.tokens, 0);
+  return {
+    id: entry.id,
+    server: entry.name,
+    ok: outcome.ok,
+    durationMs: Date.now() - started,
+    tools: outcome.tools,
+    totalTokens,
+    ...outcome.error !== void 0 ? { error: outcome.error } : {},
+    ...outcome.serverInfo ? { serverInfo: outcome.serverInfo } : {}
+  };
+}
+async function probeAll(entries, opts = {}) {
+  const limit = Math.max(1, Math.trunc(positiveOr(opts.concurrency, DEFAULT_CONCURRENCY)));
+  const results = new Array(entries.length);
+  let cursor = 0;
+  const worker = async () => {
+    for (; ; ) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= entries.length) {
+        return;
+      }
+      const entry = entries[index];
+      if (!entry) {
+        results[index] = {
+          id: `entry ${index}`,
+          server: `entry ${index}`,
+          ok: false,
+          error: "missing entry",
+          durationMs: 0,
+          tools: [],
+          totalTokens: 0
+        };
+        continue;
+      }
+      results[index] = await probeMcpServer(entry, {
+        ...opts.timeoutMs !== void 0 ? { timeoutMs: opts.timeoutMs } : {},
+        ...opts.projectRoot !== void 0 ? { projectRoot: opts.projectRoot } : {}
+      }).catch((error2) => ({
+        id: entry.id,
+        server: entry.name,
+        ok: false,
+        error: messageOf(error2),
+        durationMs: 0,
+        tools: [],
+        totalTokens: 0
+      }));
+    }
+  };
+  const workers = Array.from({ length: Math.min(limit, entries.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+async function runProbe(entry, timeoutMs, envOverride, projectRoot) {
+  if (entry.transport !== "stdio") {
+    return { ok: false, error: "remote transports are not probed", tools: [] };
+  }
+  if (!entry.command) {
+    return { ok: false, error: "stdio server has no command", tools: [] };
+  }
+  const launch = resolveLaunch(entry, projectRoot);
+  const options = {
+    // Never 'inherit': a server that reads stdin would swallow the parent's.
+    stdio: ["pipe", "pipe", "pipe"],
+    // Its own process group, so the kill below reaps the whole tree. MCP
+    // servers are usually launched through `npx`/`uvx`, which fork the real
+    // server as a child; signalling only the launcher leaves that orphaned.
+    detached: KILL_GROUP,
+    ...launch.cwd !== void 0 ? { cwd: launch.cwd } : {},
+    env: { ...process.env, ...launch.env, ...envOverride }
+  };
+  let child;
+  try {
+    child = spawn(launch.command, launch.args, options);
+  } catch (error2) {
+    return { ok: false, error: messageOf(error2), tools: [] };
+  }
+  return converse(child, timeoutMs);
+}
+function resolveLaunch(entry, projectRoot) {
+  const vars = pathVariables({
+    ...entry.pluginRoot ? { pluginRoot: entry.pluginRoot } : {},
+    ...projectRoot ? { projectRoot } : {}
+  });
+  const expand = (value) => expandVariables(value, vars);
+  const command = expand(entry.command ?? "");
+  const resolvedCommand = resolveIfRelativePath(command, entry.pluginRoot);
+  const args = (entry.args ?? []).map(expand);
+  const env = entry.env ? mapValues(entry.env, expand) : void 0;
+  const cwd = entry.cwd !== void 0 ? expand(entry.cwd) : entry.pluginRoot;
+  const resolvedCwd = cwd !== void 0 ? resolveIfRelativePath(cwd, entry.pluginRoot) : void 0;
+  return { command: resolvedCommand, args, cwd: resolvedCwd, env };
+}
+function resolveIfRelativePath(value, base) {
+  if (base === void 0 || value === "" || path12.isAbsolute(value) || !/[/\\]/.test(value)) {
+    return value;
+  }
+  return path12.resolve(base, value);
+}
+function mapValues(record2, fn) {
+  const out = {};
+  for (const [key, value] of Object.entries(record2)) {
+    out[key] = fn(value);
+  }
+  return out;
+}
+async function converse(child, timeoutMs) {
+  const waiters = /* @__PURE__ */ new Map();
+  let stderr = "";
+  let spawnError;
+  let exitCode = null;
+  let exitSignal = null;
+  child.stdin?.on("error", () => {
+  });
+  child.stderr?.on("error", () => {
+  });
+  child.stdout?.on("error", () => {
+  });
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk) => {
+    if (stderr.length < STDERR_LIMIT) {
+      stderr = (stderr + chunk).slice(0, STDERR_LIMIT);
+    }
+  });
+  let buffer = "";
+  let overflowed = false;
+  child.stdout?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk) => {
+    buffer += chunk;
+    let newline = buffer.indexOf("\n");
+    while (newline !== -1) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line) {
+        deliver(line, waiters);
+      }
+      newline = buffer.indexOf("\n");
+    }
+    if (buffer.length > STDOUT_LIMIT) {
+      overflowed = true;
+      buffer = "";
+    }
+  });
+  const exited = new Promise((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+  const closed = new Promise((resolve) => {
+    child.once("error", (error2) => {
+      spawnError ??= error2.message;
+      resolve();
+    });
+    child.once("close", (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
+      const tail = buffer.trim();
+      buffer = "";
+      if (tail) {
+        deliver(tail, waiters);
+      }
+      resolve();
+    });
+  });
+  const send = (message) => {
+    child.stdin?.write(`${JSON.stringify(message)}
+`);
+  };
+  const waitFor = (id) => new Promise((resolve) => {
+    waiters.set(id, resolve);
+  });
+  const conversation = (async () => {
+    const initPromise = waitFor(INITIALIZE_ID);
+    send({
+      jsonrpc: "2.0",
+      id: INITIALIZE_ID,
+      method: "initialize",
+      params: {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: "yard", version: "1.0.0" }
+      }
+    });
+    const init = await initPromise;
+    if (init.error) {
+      return { ok: false, error: `initialize failed: ${rpcErrorText(init.error)}`, tools: [] };
+    }
+    const listPromise = waitFor(TOOLS_LIST_ID);
+    send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    send({ jsonrpc: "2.0", id: TOOLS_LIST_ID, method: "tools/list", params: {} });
+    const listed = await listPromise;
+    const serverInfo = readServerInfo(init.result);
+    if (listed.error) {
+      return {
+        ok: false,
+        error: `tools/list failed: ${rpcErrorText(listed.error)}`,
+        tools: [],
+        ...serverInfo ? { serverInfo } : {}
+      };
+    }
+    return {
+      ok: true,
+      tools: readTools(listed.result),
+      ...serverInfo ? { serverInfo } : {}
+    };
+  })();
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+  });
+  const died = closed.then(() => "closed");
+  let raced;
+  try {
+    raced = await Promise.race([conversation, deadline, died]);
+  } finally {
+    clearTimeout(timer);
+    await terminate(child, exited);
+    release(child);
+  }
+  if (raced === "timeout") {
+    return { ok: false, error: withStderr(note(`timed out after ${timeoutMs}ms`, overflowed), stderr), tools: [] };
+  }
+  if (raced === "closed") {
+    const reason = spawnError ?? exitDescription(exitCode, exitSignal);
+    return { ok: false, error: withStderr(note(reason, overflowed), stderr), tools: [] };
+  }
+  if (!raced.ok && raced.error !== void 0) {
+    return { ...raced, error: withStderr(raced.error, stderr) };
+  }
+  return raced;
+}
+async function terminate(child, exited) {
+  const running = child.pid !== void 0 && child.exitCode === null && child.signalCode === null;
+  if (!running) {
+    await settleWithin(exited, KILL_GRACE_MS);
+    return;
+  }
+  child.stdin?.end();
+  killTree(child, "SIGTERM");
+  const hardKill = setTimeout(() => killTree(child, "SIGKILL"), KILL_GRACE_MS);
+  hardKill.unref();
+  try {
+    await settleWithin(exited, KILL_GRACE_MS * 2);
+  } finally {
+    clearTimeout(hardKill);
+  }
+}
+function release(child) {
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    try {
+      stream?.destroy();
+    } catch {
+    }
+  }
+  child.unref();
+}
+function killTree(child, signal) {
+  const pid = child.pid;
+  if (pid === void 0) {
+    return;
+  }
+  if (KILL_GROUP && pid > 1) {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+  }
+}
+async function settleWithin(promise, ms) {
+  let timer;
+  const bound = new Promise((resolve) => {
+    timer = setTimeout(resolve, ms);
+    timer.unref();
+  });
+  try {
+    await Promise.race([promise, bound]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function note(message, overflowed) {
+  return overflowed ? `${message} (discarded oversized stdout)` : message;
+}
+function positiveOr(value, fallback) {
+  return value !== void 0 && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+function deliver(line, waiters) {
+  let message;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (!isRecord(message)) {
+    return;
+  }
+  const id = correlationId(message.id);
+  if (id === void 0) {
+    return;
+  }
+  const waiter = waiters.get(id);
+  if (!waiter) {
+    return;
+  }
+  waiters.delete(id);
+  waiter(message);
+}
+function correlationId(value) {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === "string" && /^-?\d+$/.test(value)) {
+    return Number(value);
+  }
+  return void 0;
+}
+function readTools(result) {
+  if (!isRecord(result) || !Array.isArray(result.tools)) {
+    return [];
+  }
+  const tools = [];
+  for (const raw2 of result.tools) {
+    if (!isRecord(raw2) || typeof raw2.name !== "string") {
+      continue;
+    }
+    const name = raw2.name;
+    const description = typeof raw2.description === "string" ? raw2.description : "";
+    tools.push({ name, description, tokens: priceTool(name, description, raw2.inputSchema) });
+  }
+  return tools;
+}
+function priceTool(name, description, inputSchema) {
+  try {
+    return estimateJsonTokens({
+      name,
+      description,
+      ...inputSchema !== void 0 ? { inputSchema } : {}
+    });
+  } catch {
+    try {
+      return estimateJsonTokens({ name, description });
+    } catch {
+      return 0;
+    }
+  }
+}
+function readServerInfo(result) {
+  if (!isRecord(result) || !isRecord(result.serverInfo)) {
+    return void 0;
+  }
+  const info = result.serverInfo;
+  if (typeof info.name !== "string") {
+    return void 0;
+  }
+  return { name: info.name, version: typeof info.version === "string" ? info.version : "" };
+}
+function exitDescription(code, signal) {
+  if (signal) {
+    return `server exited on ${signal} before responding`;
+  }
+  if (code !== null) {
+    return `server exited with code ${code} before responding`;
+  }
+  return "server exited before responding";
+}
+var STDERR_TAIL_LINES = 4;
+function withStderr(message, stderr) {
+  const lines = stderr.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return message;
+  }
+  const tail = lines.slice(-STDERR_TAIL_LINES);
+  const errorLine = lines.find((line) => line.includes("Error:"));
+  const kept = errorLine !== void 0 && !tail.includes(errorLine) ? [errorLine, ...tail] : tail;
+  return `${message}: ${kept.join("\n")}`;
+}
+function rpcErrorText(error2) {
+  const text = typeof error2.message === "string" ? error2.message : JSON.stringify(error2);
+  return typeof error2.code === "number" ? `${text} (${error2.code})` : text;
+}
+function messageOf(error2) {
+  return error2 instanceof Error ? error2.message : String(error2);
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/env/context.ts
+var DEFAULT_MAX_DESC_CHARS = 1536;
+var UNPROBED_MCP_TOKENS = 1200;
+async function buildContextReport(inventory, options = {}) {
+  const maxDescChars = options.maxDescChars ?? DEFAULT_MAX_DESC_CHARS;
+  const lines = [];
+  const notes = [];
+  for (const skill of inventory.skills) {
+    if (skill.visibility === "off" || skill.visibility === "user-invocable-only") {
+      continue;
+    }
+    const description = skill.visibility === "name-only" ? "" : skill.description.slice(0, maxDescChars);
+    const tokens = estimateTokens(`${skill.qualifiedName}: ${description}`);
+    lines.push({
+      id: skill.id,
+      client: skill.client,
+      kind: "skill",
+      label: skill.qualifiedName,
+      tokens,
+      measured: true,
+      ...skill.description.length > maxDescChars ? { detail: `description truncated at ${maxDescChars} chars` } : {},
+      // A plugin skill can be overridden via its `<plugin>:<skill>` key, but
+      // the natural switch — and the one that also drops the plugin's hooks
+      // and servers — is the plugin itself, so that is the remedy shown. It
+      // is deliberately not `remedyActionable`: Yard has no API for another
+      // client's plugin lifecycle, only `skillActionBlocked`'s refusal.
+      ...skill.scope === "plugin" && skill.plugin ? { remedy: pluginRemedy(skill.client, skill.plugin) } : skill.client === "claude" ? {
+        remedy: `yard skill ${skill.qualifiedName} user-invocable-only`,
+        remedyActionable: skillActionBlocked(skill) === void 0
+      } : {}
+    });
+  }
+  const enabledServers = inventory.mcpServers.filter((server) => server.enabled);
+  let probes = [];
+  if (options.probe && enabledServers.length) {
+    probes = await probeAll(enabledServers, {
+      projectRoot: inventory.projectRoot,
+      ...options.probeTimeoutMs !== void 0 ? { timeoutMs: options.probeTimeoutMs } : {}
+    });
+  }
+  for (const server of enabledServers) {
+    const probe = probes.find((result) => result.id === server.id);
+    const remedy = mcpRemedy(server);
+    if (probe?.ok) {
+      lines.push({
+        id: server.id,
+        client: server.client,
+        kind: "mcp",
+        label: server.name,
+        tokens: probe.totalTokens,
+        measured: true,
+        detail: `${probe.tools.length} tools`,
+        ...remedy
+      });
+      continue;
+    }
+    lines.push({
+      id: server.id,
+      client: server.client,
+      kind: "mcp",
+      label: server.name,
+      tokens: UNPROBED_MCP_TOKENS,
+      measured: false,
+      detail: probe?.error ?? (options.probe ? "probe failed" : "not probed \u2014 run with --probe for the real cost"),
+      ...remedy
+    });
+  }
+  if (!options.probe && enabledServers.length) {
+    notes.push(
+      `${enabledServers.length} MCP server(s) were estimated, not measured. Re-run with --probe to start them and read their real tool schemas.`
+    );
+  }
+  for (const agent of inventory.agents) {
+    lines.push({
+      id: agent.id,
+      client: agent.client,
+      kind: "agent",
+      label: agent.name,
+      tokens: estimateTokens(`${agent.name}: ${agent.description}`),
+      measured: true
+    });
+  }
+  for (const command of inventory.commands) {
+    lines.push({
+      id: command.id,
+      client: command.client,
+      kind: "command",
+      label: command.name,
+      tokens: estimateTokens(`${command.name}: ${command.description}`),
+      measured: true
+    });
+  }
+  for (const memory of inventory.memory) {
+    lines.push({
+      id: memory.id,
+      client: memory.client,
+      kind: "memory",
+      label: memory.name,
+      tokens: tokensFromBytes(memory.bytes),
+      measured: false,
+      detail: `${memory.bytes} bytes, loaded in full`
+    });
+  }
+  lines.sort((a, b) => b.tokens - a.tokens || a.id.localeCompare(b.id));
+  const byKind = { skill: 0, mcp: 0, agent: 0, command: 0, memory: 0 };
+  const byClient = {};
+  let total = 0;
+  for (const line of lines) {
+    byKind[line.kind] += line.tokens;
+    byClient[line.client] = (byClient[line.client] ?? 0) + line.tokens;
+    total += line.tokens;
+  }
+  return {
+    projectRoot: inventory.projectRoot,
+    clients: inventory.clients,
+    total,
+    byKind,
+    byClient,
+    lines,
+    probed: Boolean(options.probe),
+    notes
+  };
+}
+function tokensFromBytes(bytes) {
+  return Math.round(bytes / 4.1);
+}
+function pluginRemedy(client, plugin) {
+  return client === "claude" ? `yard plugin disable ${plugin}` : `${client} plugin remove ${plugin}`;
+}
+function mcpRemedy(server) {
+  if (server.client === "codex") {
+    return {};
+  }
+  if (mcpActionBlocked(server)) {
+    return server.plugin ? { remedy: pluginRemedy(server.client, server.plugin) } : {};
+  }
+  return { remedy: `yard mcp disable ${server.name}`, remedyActionable: true };
+}
+function topOffenders(report, limit = 10) {
+  return report.lines.filter((line) => line.remedy).slice(0, limit);
+}
+
 // src/cli/format.ts
 import os from "node:os";
-import path12 from "node:path";
+import path13 from "node:path";
 var ANSI = /\u001b\[[0-9;]*m/g;
 var ELLIPSIS = "\u2026";
 function visibleWidth(value) {
@@ -4832,13 +5427,13 @@ function shortenPath(file, projectRoot) {
     return "";
   }
   if (projectRoot) {
-    const relative = path12.relative(projectRoot, file);
-    if (relative && !relative.startsWith("..") && !path12.isAbsolute(relative)) {
+    const relative = path13.relative(projectRoot, file);
+    if (relative && !relative.startsWith("..") && !path13.isAbsolute(relative)) {
       return relative;
     }
   }
   const home2 = os.homedir();
-  if (home2 && file.startsWith(home2 + path12.sep)) {
+  if (home2 && file.startsWith(home2 + path13.sep)) {
     return `~${file.slice(home2.length)}`;
   }
   return file;
@@ -4992,21 +5587,13 @@ function remedyTarget(remedy) {
 }
 
 // src/env/doctor.ts
+init_client_paths();
 init_safe_io();
-import path13 from "node:path";
+import path14 from "node:path";
 var DESCRIPTION_BUDGET = 1024;
 async function diagnose(inventory, options = {}) {
   const found = [];
-  for (const warning of inventory.warnings) {
-    found.push({
-      severity: "warning",
-      client: warning.client,
-      code: "unreadable-config",
-      summary: warning.file ? `${warning.file}: ${warning.message}` : warning.message,
-      ...warning.file ? { file: warning.file } : {},
-      remedy: "Fix or remove the file \u2014 the client silently ignores what it cannot parse"
-    });
-  }
+  found.push(...warningDiagnoses(inventory));
   found.push(...await checkHooks(inventory));
   found.push(...checkSkills(inventory));
   found.push(...checkPlugins(inventory));
@@ -5033,12 +5620,14 @@ async function checkHooks(inventory) {
     if (hook.type !== "command") {
       continue;
     }
-    const script = scriptPathFrom(hook.command);
+    const pluginRoot = hook.plugin ? hook.pluginRoot ?? pluginRootOf(hook.file) : void 0;
+    const vars = pathVariables({ ...pluginRoot ? { pluginRoot } : {}, projectRoot: inventory.projectRoot });
+    const script = scriptPathFrom(hook.command, vars);
     if (!script) {
       continue;
     }
-    const base = hook.plugin ? pluginRootOf(hook.file) : path13.dirname(hook.file);
-    const resolved = path13.isAbsolute(script) ? script : path13.resolve(base, script);
+    const base = pluginRoot ?? path14.dirname(hook.file);
+    const resolved = path14.isAbsolute(script) ? script : path14.resolve(base, script);
     if (await exists2(resolved)) {
       continue;
     }
@@ -5052,6 +5641,62 @@ async function checkHooks(inventory) {
     });
   }
   return found;
+}
+function disabledSkillDirs(projectRoot) {
+  return [
+    { client: "claude", dir: claudePaths(projectRoot).userSkillsDisabled },
+    { client: "codex", dir: codexPaths(projectRoot).userSkillsDisabled }
+  ];
+}
+function warningDiagnoses(inventory) {
+  const found = [];
+  const disabledDirs = disabledSkillDirs(inventory.projectRoot);
+  const parked = /* @__PURE__ */ new Map();
+  for (const warning of inventory.warnings) {
+    const parking = disabledDirs.find(
+      (candidate) => warning.file === candidate.dir || warning.file.startsWith(candidate.dir + path14.sep)
+    );
+    if (parking) {
+      const entry = parked.get(parking.dir) ?? { client: parking.client, dir: parking.dir, count: 0 };
+      entry.count += 1;
+      parked.set(parking.dir, entry);
+      continue;
+    }
+    found.push({
+      severity: "warning",
+      client: warning.client,
+      code: "unreadable-config",
+      summary: warning.file ? `${warning.file}: ${warning.message}` : warning.message,
+      ...warning.file ? { file: warning.file } : {},
+      remedy: "Fix or remove the file \u2014 the client silently ignores what it cannot parse"
+    });
+  }
+  for (const { client, dir, count } of parked.values()) {
+    const plural2 = count === 1 ? "entry" : "entries";
+    found.push({
+      severity: "info",
+      client,
+      code: "disabled-dir-noise",
+      summary: `${count} stale ${plural2} under ${dir}; ${clientName(client)} does not scan its own disabled-skill directory, so none of this affects an active session`,
+      file: dir,
+      remedy: `Clean up ${dir} whenever convenient: remove the broken links, or restore what they point to`
+    });
+  }
+  return found;
+}
+function clientName(client) {
+  switch (client) {
+    case "claude":
+      return "Claude Code";
+    case "codex":
+      return "Codex";
+    case "cursor":
+      return "Cursor";
+    default: {
+      const exhaustive = client;
+      throw new Error(`unknown client: ${String(exhaustive)}`);
+    }
+  }
 }
 function checkSkills(inventory) {
   const found = [];
@@ -5120,7 +5765,9 @@ function checkPlugins(inventory) {
         remedy: `Install it, or remove it from ${plugin.enabledSource ?? "settings"}`
       });
     }
-    if (plugin.enabled && plugin.installed && !contributions.get(`${plugin.client}:${plugin.name}`)) {
+    const counted = contributions.get(`${plugin.client}:${plugin.name}`) ?? 0;
+    const total = counted + (plugin.otherContributions ?? 0);
+    if (plugin.enabled && plugin.installed && total === 0) {
       found.push({
         severity: "info",
         client: plugin.client,
@@ -5151,6 +5798,7 @@ async function checkMcpReachable(inventory, options) {
     return [];
   }
   const results = await probeAll(enabled, {
+    projectRoot: inventory.projectRoot,
     ...options.probeTimeoutMs !== void 0 ? { timeoutMs: options.probeTimeoutMs } : {}
   });
   return results.filter((result) => !result.ok).map((result) => {
@@ -5165,21 +5813,20 @@ async function checkMcpReachable(inventory, options) {
     };
   });
 }
-function scriptPathFrom(command) {
+function scriptPathFrom(command, vars) {
   const trimmed = command.trim();
   if (/[;&|<>]|\$\(|\bif\b|\bfor\b|\bwhile\b/.test(trimmed)) {
     return void 0;
   }
-  const tokens = trimmed.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
-  const candidates = tokens.map((token) => token.replace(/^["']|["']$/g, "")).filter((token) => !token.startsWith("-"));
-  const script = candidates.find((token) => /[/\\]/.test(token) && /\.[a-z0-9]+$/i.test(token));
-  if (!script || script.includes("${") || script.includes("$")) {
+  const tokens = splitShellWords(trimmed).map((token) => expandVariables(token, vars)).filter((token) => !token.startsWith("-"));
+  const script = tokens.find((token) => /[/\\]/.test(token) && /\.[a-z0-9]+$/i.test(token));
+  if (!script || !isFullyExpanded(script)) {
     return void 0;
   }
   return script;
 }
 function pluginRootOf(hookFile) {
-  return path13.resolve(path13.dirname(hookFile), "..");
+  return path14.resolve(path14.dirname(hookFile), "..");
 }
 function rank(severity) {
   return severity === "error" ? 0 : severity === "warning" ? 1 : 2;
@@ -5259,151 +5906,6 @@ async function runEmitMcp() {
   console.error(`wrote ${YARD_PLUGIN_DIR}/.mcp.json`);
   console.error(`wrote ${YARD_PLUGIN_DIR}/mcp.json`);
   return 0;
-}
-
-// src/env/actions.ts
-async function setSkillVisibility2(opts) {
-  const client = await resolveClient(
-    opts,
-    `skill "${opts.skill}"`,
-    (inventory) => inventory.skills.filter((skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill)
-  );
-  if (client !== "claude") {
-    const enabled = opts.visibility === "on";
-    return setSkillEnabled({ ...opts, enabled, client });
-  }
-  const result = await setSkillVisibility({
-    skill: opts.skill,
-    visibility: opts.visibility,
-    projectRoot: opts.projectRoot,
-    ...opts.scope ? { scope: opts.scope } : {},
-    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
-  });
-  return {
-    changed: result.changed,
-    file: result.file,
-    ...result.backup ? { backup: result.backup } : {},
-    dryRun: opts.dryRun === true,
-    detail: result.changed ? `${opts.skill} \u2192 ${opts.visibility} in ${result.file}` : `${opts.skill} was already ${opts.visibility}`
-  };
-}
-async function setSkillEnabled(opts) {
-  const client = await resolveClient(
-    opts,
-    `skill "${opts.skill}"`,
-    (inventory) => inventory.skills.filter((skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill)
-  );
-  const move = client === "claude" ? await setSkillDirectoryEnabled({
-    skill: opts.skill,
-    enabled: opts.enabled,
-    projectRoot: opts.projectRoot,
-    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
-  }) : client === "codex" ? await (await Promise.resolve().then(() => (init_codex(), codex_exports))).setSkillDirectoryEnabled({
-    skill: opts.skill,
-    enabled: opts.enabled,
-    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
-  }) : void 0;
-  if (!move) {
-    throw new Error(
-      `Cursor has no enable/disable for skills. Move ${opts.skill} out of its skills directory by hand.`
-    );
-  }
-  return {
-    changed: move.moved,
-    file: move.to,
-    dryRun: opts.dryRun === true,
-    detail: move.moved ? `moved ${move.from} \u2192 ${move.to}` : opts.dryRun ? `would move ${move.from} \u2192 ${move.to}` : `${opts.skill} was already ${opts.enabled ? "enabled" : "disabled"}`
-  };
-}
-async function setPluginEnabled2(opts) {
-  const client = await resolveClient(
-    opts,
-    `plugin "${opts.plugin}"`,
-    (inventory) => inventory.plugins.filter((plugin) => plugin.qualifiedName === opts.plugin || plugin.name === opts.plugin)
-  );
-  if (client !== "claude") {
-    throw new Error(
-      `Only Claude Code stores plugin enablement in settings. Use \`${client} plugin ${opts.enabled ? "add" : "remove"} ${opts.plugin}\`.`
-    );
-  }
-  const result = await setPluginEnabled({
-    plugin: opts.plugin,
-    enabled: opts.enabled,
-    projectRoot: opts.projectRoot,
-    ...opts.scope ? { scope: opts.scope } : {},
-    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
-  });
-  return {
-    changed: result.changed,
-    file: result.file,
-    ...result.backup ? { backup: result.backup } : {},
-    dryRun: opts.dryRun === true,
-    detail: result.changed ? `${opts.plugin} ${opts.enabled ? "enabled" : "disabled"} in ${result.file}` : `${opts.plugin} was already ${opts.enabled ? "enabled" : "disabled"}`
-  };
-}
-async function setMcpEnabled2(opts) {
-  const client = await resolveClient(
-    opts,
-    `mcp server "${opts.server}"`,
-    (inventory) => inventory.mcpServers.filter((server) => server.name === opts.server)
-  );
-  if (client === "cursor") {
-    const result2 = await setMcpServerEnabled({
-      server: opts.server,
-      enabled: opts.enabled,
-      scope: opts.scope === "project" ? "project" : "user",
-      projectRoot: opts.projectRoot,
-      ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
-    });
-    return {
-      changed: result2.changed,
-      file: result2.file,
-      ...result2.backup ? { backup: result2.backup } : {},
-      dryRun: opts.dryRun === true,
-      detail: result2.changed ? `${opts.server} ${opts.enabled ? "restored to" : "parked out of"} mcpServers in ${result2.file}` : `${opts.server} was already ${opts.enabled ? "enabled" : "disabled"}`
-    };
-  }
-  if (client === "codex") {
-    throw new Error(
-      `Codex owns ~/.codex/config.toml. Use \`codex mcp ${opts.enabled ? "add" : "remove"} ${opts.server}\` so its formatting and comments survive.`
-    );
-  }
-  const result = await setMcpEnabled({
-    server: opts.server,
-    enabled: opts.enabled,
-    projectRoot: opts.projectRoot,
-    ...opts.scope ? { scope: opts.scope } : {},
-    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
-  });
-  return {
-    changed: result.changed,
-    file: result.file,
-    ...result.backup ? { backup: result.backup } : {},
-    dryRun: opts.dryRun === true,
-    detail: result.changed ? `${opts.server} ${opts.enabled ? "approved" : "rejected"} in ${result.file}` : `${opts.server} was already ${opts.enabled ? "enabled" : "disabled"}`
-  };
-}
-async function resolveClient(opts, subject, matches) {
-  const inventory = opts.inventory ?? await scanEnvironment(opts.projectRoot);
-  const found = matches(inventory);
-  const clients = [...new Set(found.map((item) => item.client))];
-  if (opts.client) {
-    if (clients.includes(opts.client)) {
-      return opts.client;
-    }
-    throw new Error(
-      clients.length ? `${subject} not found in ${opts.client} \u2014 it is in ${clients.join(", ")}` : `${subject} not found in ${opts.client} \u2014 run \`yard scan\` to see what is there`
-    );
-  }
-  if (clients.length === 1 && clients[0]) {
-    return clients[0];
-  }
-  if (clients.length === 0) {
-    throw new Error(`${subject} not found in any installed client \u2014 run \`yard scan\` to see what is there`);
-  }
-  throw new Error(
-    `${subject} is ambiguous across ${clients.join(", ")} \u2014 set client to one of them (matched ${found.map((item) => item.id).join(", ")})`
-  );
 }
 
 // src/cli/mutate.ts
@@ -6643,10 +7145,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path17) {
-  if (!path17)
+function getElementAtPath(obj, path18) {
+  if (!path18)
     return obj;
-  return path17.reduce((acc, key) => acc?.[key], obj);
+  return path18.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7055,11 +7557,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path17, issues) {
+function prefixIssues(path18, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path17);
+    iss.path.unshift(path18);
     return iss;
   });
 }
@@ -7206,16 +7708,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path17 = []) => {
+  const processError = (error3, path18 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path17, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path18, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path18, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path18, ...issue2.path]);
       } else {
-        const fullpath = [...path17, ...issue2.path];
+        const fullpath = [...path18, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -15587,9 +16089,9 @@ var rev2026Codec = {
     });
     const parsed = buildSchemas2026().RequestMetaEnvelopeSchema.safeParse(meta2);
     if (!parsed.success) for (const issue2 of parsed.error.issues) {
-      const path17 = issue2.path.map(String);
-      const key = path17.length > 0 ? path17.join(".") : "_meta";
-      if (path17.length === 1 && issues.some((existing) => existing.key === key && existing.problem === "missing")) continue;
+      const path18 = issue2.path.map(String);
+      const key = path18.length > 0 ? path18.join(".") : "_meta";
+      if (path18.length === 1 && issues.some((existing) => existing.key === key && existing.problem === "missing")) continue;
       issues.push({
         key,
         problem: issue2.message
@@ -15912,29 +16414,29 @@ var PERMITTED_X_MCP_HEADER_TYPES = /* @__PURE__ */ new Set([
 function scanXMcpHeaderDeclarations(inputSchema) {
   const declarations = [];
   const seenLower = /* @__PURE__ */ new Map();
-  const visit = (node, path17, reachable) => {
+  const visit = (node, path18, reachable) => {
     if (node === null || typeof node !== "object") return void 0;
     const schema = node;
     if (X_MCP_HEADER_KEY in schema) {
-      if (!reachable || path17.length === 0) return `${pathName(path17)}: x-mcp-header is only permitted on properties statically reachable via a chain of 'properties' keys (not under items, additionalProperties, oneOf/anyOf/allOf/not, if/then/else, or $ref)`;
+      if (!reachable || path18.length === 0) return `${pathName(path18)}: x-mcp-header is only permitted on properties statically reachable via a chain of 'properties' keys (not under items, additionalProperties, oneOf/anyOf/allOf/not, if/then/else, or $ref)`;
       const raw2 = schema[X_MCP_HEADER_KEY];
-      if (typeof raw2 !== "string" || raw2.length === 0) return `${pathName(path17)}: x-mcp-header MUST be a non-empty string`;
-      if (!RFC9110_TOKEN.test(raw2)) return `${pathName(path17)}: x-mcp-header '${raw2}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
+      if (typeof raw2 !== "string" || raw2.length === 0) return `${pathName(path18)}: x-mcp-header MUST be a non-empty string`;
+      if (!RFC9110_TOKEN.test(raw2)) return `${pathName(path18)}: x-mcp-header '${raw2}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
       const type = typeof schema.type === "string" ? schema.type : void 0;
-      if (type === void 0 || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) return `${pathName(path17)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
+      if (type === void 0 || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) return `${pathName(path18)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
       const lower = raw2.toLowerCase();
       const prior = seenLower.get(lower);
       if (prior !== void 0) return `x-mcp-header '${raw2}' is not case-insensitively unique (also declared as '${prior}')`;
       seenLower.set(lower, raw2);
       declarations.push({
-        path: path17,
+        path: path18,
         headerName: raw2,
         type
       });
     }
     const properties = schema.properties;
     if (properties !== null && typeof properties === "object") for (const [key, child] of Object.entries(properties)) {
-      const fault$1 = visit(child, [...path17, key], reachable);
+      const fault$1 = visit(child, [...path18, key], reachable);
       if (fault$1 !== void 0) return fault$1;
     }
     for (const k of NON_REACHABLE_SUBSCHEMA_KEYWORDS) {
@@ -15942,7 +16444,7 @@ function scanXMcpHeaderDeclarations(inputSchema) {
       if (sub === void 0) continue;
       const branches = Array.isArray(sub) ? sub : sub !== null && typeof sub === "object" && OBJECT_VALUED_SUBSCHEMA_KEYWORDS.has(k) ? Object.values(sub) : [sub];
       for (const branch of branches) {
-        const fault$1 = visit(branch, [...path17, `<${k}>`], false);
+        const fault$1 = visit(branch, [...path18, `<${k}>`], false);
         if (fault$1 !== void 0) return fault$1;
       }
     }
@@ -15982,8 +16484,8 @@ var OBJECT_VALUED_SUBSCHEMA_KEYWORDS = /* @__PURE__ */ new Set([
   "$defs",
   "definitions"
 ]);
-function pathName(path17) {
-  return path17.length === 0 ? "<root>" : path17.join(".");
+function pathName(path18) {
+  return path18.length === 0 ? "<root>" : path18.join(".");
 }
 var BASE64_SENTINEL_PREFIX = "=?base64?";
 var BASE64_SENTINEL_SUFFIX = "?=";
@@ -16014,9 +16516,9 @@ function decodeMcpParamValue(value) {
     return;
   }
 }
-function valueAtPath(root, path17) {
+function valueAtPath(root, path18) {
   let node = root;
-  for (const key of path17) {
+  for (const key of path18) {
     if (node === null || typeof node !== "object") return void 0;
     node = node[key];
   }
@@ -16510,7 +17012,7 @@ var PROPERTY_KEYS_BY_TYPE = {
   array: shapeKeys([UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema])
 };
 var SUPPORTED_STRING_FORMATS = new Set(StringSchemaSchema.shape.format.unwrap().options);
-function walkProperty(node, path17, vendor, unsupported) {
+function walkProperty(node, path18, vendor, unsupported) {
   if (!isJsonObject(node)) return node;
   const allowedKeys = typeof node.type === "string" && Object.hasOwn(PROPERTY_KEYS_BY_TYPE, node.type) ? PROPERTY_KEYS_BY_TYPE[node.type] : void 0;
   if (allowedKeys === void 0) return node;
@@ -16518,8 +17020,8 @@ function walkProperty(node, path17, vendor, unsupported) {
   for (const [key, value] of Object.entries(node)) if (allowedKeys.has(key) || isAnnotationOnlyJsonSchemaKeyword(key)) pruned[key] = value;
   else if (key === "pattern" && node.type === "string" && typeof node.format === "string") {
     if (!SUPPORTED_STRING_FORMATS.has(node.format)) pruned[key] = value;
-    else if (typeof value !== "string" || !isLibraryFormatPattern(node.format, value, vendor)) unsupported.push(`${path17}.${key}`);
-  } else unsupported.push(`${path17}.${key}`);
+    else if (typeof value !== "string" || !isLibraryFormatPattern(node.format, value, vendor)) unsupported.push(`${path18}.${key}`);
+  } else unsupported.push(`${path18}.${key}`);
   return pruned;
 }
 function walkRequestedSchema(converted, vendor) {
@@ -16536,11 +17038,11 @@ function describeUnsupportedProperties(pruned, fallback) {
   const offenders = Object.entries(pruned.properties).filter(([, node]) => !parseSchema(PrimitiveSchemaDefinitionSchema, node).success).map(([name]) => `properties.${name}`);
   return offenders.length > 0 ? offenders.join(", ") : fallback;
 }
-function findDroppedConstraintPaths(original, parsed, path17 = "") {
-  if (Array.isArray(original) && Array.isArray(parsed)) return original.flatMap((item, index) => findDroppedConstraintPaths(item, parsed[index], `${path17}[${index}]`));
+function findDroppedConstraintPaths(original, parsed, path18 = "") {
+  if (Array.isArray(original) && Array.isArray(parsed)) return original.flatMap((item, index) => findDroppedConstraintPaths(item, parsed[index], `${path18}[${index}]`));
   if (!isJsonObject(original) || !isJsonObject(parsed)) return [];
   return Object.entries(original).flatMap(([key, value]) => {
-    const childPath = path17 ? `${path17}.${key}` : key;
+    const childPath = path18 ? `${path18}.${key}` : key;
     if (!Object.prototype.hasOwnProperty.call(parsed, key)) return isAnnotationOnlyJsonSchemaKeyword(key) ? [] : [childPath];
     return findDroppedConstraintPaths(value, parsed[key], childPath);
   });
@@ -20834,8 +21336,8 @@ var require_utils = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     for (let i = 0; i < str.length; i++) if (str[i] === token) ind++;
     return ind;
   }
-  function removeDotSegments(path17) {
-    let input = path17;
+  function removeDotSegments(path18) {
+    let input = path18;
     const output = [];
     let nextSlash = -1;
     let len = 0;
@@ -20988,8 +21490,8 @@ var require_schemes = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       wsComponent.secure = void 0;
     }
     if (wsComponent.resourceName) {
-      const [path17, query] = wsComponent.resourceName.split("?");
-      wsComponent.path = path17 && path17 !== "/" ? path17 : void 0;
+      const [path18, query] = wsComponent.resourceName.split("?");
+      wsComponent.path = path18 && path18 !== "/" ? path18 : void 0;
       wsComponent.query = query;
       wsComponent.resourceName = void 0;
     }
@@ -27290,7 +27792,7 @@ import { existsSync as existsSync3, watch } from "node:fs";
 init_frontmatter();
 import { existsSync as existsSync2 } from "node:fs";
 import { readdir as readdir6, readFile as readFile6, realpath, stat as stat4 } from "node:fs/promises";
-import path14 from "node:path";
+import path15 from "node:path";
 
 // src/types.ts
 var ARTIFACT_KINDS = ["skill", "rule", "agent", "command", "hook", "mcp"];
@@ -27321,14 +27823,14 @@ var Catalog = class {
     if (this.snapshot) {
       return this.snapshot;
     }
-    const marketplacePath = path14.join(this.root, path14.relative(REPO_ROOT, CLAUDE_MARKETPLACE));
+    const marketplacePath = path15.join(this.root, path15.relative(REPO_ROOT, CLAUDE_MARKETPLACE));
     const plugins = [];
     const artifacts = [];
     if (await exists3(marketplacePath)) {
       const marketplace = JSON.parse(await readFile6(marketplacePath, "utf8"));
       for (const entry of marketplace.plugins) {
         const source = pluginSource(entry);
-        const pluginRoot = path14.resolve(this.root, source);
+        const pluginRoot = path15.resolve(this.root, source);
         const plugin = {
           name: entry.name,
           description: entry.description ?? "",
@@ -27386,7 +27888,7 @@ async function scanPlugin(plugin) {
   return found;
 }
 async function scanSkills(plugin) {
-  const dir = path14.join(plugin.root, "skills");
+  const dir = path15.join(plugin.root, "skills");
   if (!await exists3(dir)) {
     return [];
   }
@@ -27395,7 +27897,7 @@ async function scanSkills(plugin) {
     if (!entry.isDirectory()) {
       continue;
     }
-    const file = path14.join(dir, entry.name, "SKILL.md");
+    const file = path15.join(dir, entry.name, "SKILL.md");
     if (!await exists3(file)) {
       continue;
     }
@@ -27404,7 +27906,7 @@ async function scanSkills(plugin) {
   return records;
 }
 async function scanMarkdownKind(plugin, kind, directory, extensions) {
-  const dir = path14.join(plugin.root, directory);
+  const dir = path15.join(plugin.root, directory);
   if (!await exists3(dir)) {
     return [];
   }
@@ -27413,21 +27915,21 @@ async function scanMarkdownKind(plugin, kind, directory, extensions) {
     if (!entry.isFile()) {
       continue;
     }
-    const ext = path14.extname(entry.name);
+    const ext = path15.extname(entry.name);
     if (!extensions.includes(ext)) {
       continue;
     }
-    const name = path14.basename(entry.name, ext);
-    records.push(await readMarkdownArtifact(plugin, kind, name, path14.join(dir, entry.name)));
+    const name = path15.basename(entry.name, ext);
+    records.push(await readMarkdownArtifact(plugin, kind, name, path15.join(dir, entry.name)));
   }
   return records;
 }
 async function scanHooks(plugin) {
-  const dir = path14.join(plugin.root, "hooks");
+  const dir = path15.join(plugin.root, "hooks");
   if (!await exists3(dir)) {
     return [];
   }
-  const file = path14.join(dir, "hooks.json");
+  const file = path15.join(dir, "hooks.json");
   if (!await exists3(file)) {
     return [];
   }
@@ -27461,7 +27963,7 @@ async function scanMcp(plugin) {
       kind: "mcp",
       name: spec.key,
       description: spec.transport.type === "stdio" ? `${plugin.name} MCP ${spec.key} (${spec.transport.command})` : `${plugin.name} MCP ${spec.key} (${spec.transport.url})`,
-      path: path14.join(plugin.root, ".mcp.json"),
+      path: path15.join(plugin.root, ".mcp.json"),
       version: plugin.version,
       body: raw2,
       raw: raw2
@@ -27469,7 +27971,7 @@ async function scanMcp(plugin) {
   });
 }
 function selfPlugin() {
-  if (!existsSync2(path14.join(SERVER_DIR, ".claude-plugin", "plugin.json"))) {
+  if (!existsSync2(path15.join(SERVER_DIR, ".claude-plugin", "plugin.json"))) {
     return void 0;
   }
   return {
@@ -27506,7 +28008,7 @@ async function exists3(target) {
 async function assertInsideRoot(file, root) {
   const resolved = await realpath(file);
   const resolvedRoot = await realpath(root);
-  if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path14.sep)) {
+  if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path15.sep)) {
     throw new Error("path escapes plugin root");
   }
   return resolved;
@@ -27518,7 +28020,7 @@ function indexOf(artifact) {
 
 // src/http.ts
 import { readFile as readFile7, stat as stat5, writeFile as writeFile5 } from "node:fs/promises";
-import path15 from "node:path";
+import path16 from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 var PerRequestHTTPServerTransport = class {
@@ -28911,26 +29413,26 @@ var handleParsingNestedValues = (form, key, value) => {
 };
 
 // node_modules/hono/dist/utils/url.js
-var splitPath = (path17) => {
-  const paths = path17.split("/");
+var splitPath = (path18) => {
+  const paths = path18.split("/");
   if (paths[0] === "") {
     paths.shift();
   }
   return paths;
 };
 var splitRoutingPath = (routePath) => {
-  const { groups, path: path17 } = extractGroupsFromPath(routePath);
-  const paths = splitPath(path17);
+  const { groups, path: path18 } = extractGroupsFromPath(routePath);
+  const paths = splitPath(path18);
   return replaceGroupMarks(paths, groups);
 };
-var extractGroupsFromPath = (path17) => {
+var extractGroupsFromPath = (path18) => {
   const groups = [];
-  path17 = path17.replace(/\{[^}]+\}/g, (match2, index) => {
+  path18 = path18.replace(/\{[^}]+\}/g, (match2, index) => {
     const mark = `@${index}`;
     groups.push([mark, match2]);
     return mark;
   });
-  return { groups, path: path17 };
+  return { groups, path: path18 };
 };
 var replaceGroupMarks = (paths, groups) => {
   for (let i = groups.length - 1; i >= 0; i--) {
@@ -28987,8 +29489,8 @@ var getPath = (request) => {
       const queryIndex = url2.indexOf("?", i);
       const hashIndex = url2.indexOf("#", i);
       const end = queryIndex === -1 ? hashIndex === -1 ? void 0 : hashIndex : hashIndex === -1 ? queryIndex : Math.min(queryIndex, hashIndex);
-      const path17 = url2.slice(start, end);
-      return tryDecodeURI(path17.includes("%25") ? path17.replace(/%25/g, "%2525") : path17);
+      const path18 = url2.slice(start, end);
+      return tryDecodeURI(path18.includes("%25") ? path18.replace(/%25/g, "%2525") : path18);
     } else if (charCode === 63 || charCode === 35) {
       break;
     }
@@ -29005,11 +29507,11 @@ var mergePath = (base, sub, ...rest) => {
   }
   return `${base?.[0] === "/" ? "" : "/"}${base}${sub === "/" ? "" : `${base?.at(-1) === "/" ? "" : "/"}${sub?.[0] === "/" ? sub.slice(1) : sub}`}`;
 };
-var checkOptionalParameter = (path17) => {
-  if (path17.charCodeAt(path17.length - 1) !== 63 || !path17.includes(":")) {
+var checkOptionalParameter = (path18) => {
+  if (path18.charCodeAt(path18.length - 1) !== 63 || !path18.includes(":")) {
     return null;
   }
-  const segments = path17.split("/");
+  const segments = path18.split("/");
   const results = [];
   let basePath = "";
   segments.forEach((segment) => {
@@ -29147,9 +29649,9 @@ var HonoRequest = class {
    */
   path;
   bodyCache = {};
-  constructor(request, path17 = "/", matchResult = [[]]) {
+  constructor(request, path18 = "/", matchResult = [[]]) {
     this.raw = request;
-    this.path = path17;
+    this.path = path18;
     this.#matchResult = matchResult;
   }
   param(key) {
@@ -29916,8 +30418,8 @@ var Hono = class _Hono {
         return this;
       };
     });
-    this.on = (method, path17, ...handlers) => {
-      for (const p of [path17].flat()) {
+    this.on = (method, path18, ...handlers) => {
+      for (const p of [path18].flat()) {
         this.#path = p;
         for (const m of [method].flat()) {
           handlers.map((handler) => {
@@ -29974,8 +30476,8 @@ var Hono = class _Hono {
    * app.route("/api", app2) // GET /api/user
    * ```
    */
-  route(path17, app) {
-    const subApp = this.basePath(path17);
+  route(path18, app) {
+    const subApp = this.basePath(path18);
     app.routes.map((r) => {
       let handler;
       if (app.errorHandler === errorHandler) {
@@ -30001,9 +30503,9 @@ var Hono = class _Hono {
    * const api = new Hono().basePath('/api')
    * ```
    */
-  basePath(path17) {
+  basePath(path18) {
     const subApp = this.#clone();
-    subApp._basePath = mergePath(this._basePath, path17);
+    subApp._basePath = mergePath(this._basePath, path18);
     return subApp;
   }
   /**
@@ -30077,7 +30579,7 @@ var Hono = class _Hono {
    * })
    * ```
    */
-  mount(path17, applicationHandler, options) {
+  mount(path18, applicationHandler, options) {
     let replaceRequest;
     let optionHandler;
     if (options) {
@@ -30104,7 +30606,7 @@ var Hono = class _Hono {
       return [c.env, executionContext];
     };
     replaceRequest ||= (() => {
-      const mergedPath = mergePath(this._basePath, path17);
+      const mergedPath = mergePath(this._basePath, path18);
       const pathPrefixLength = mergedPath === "/" ? 0 : mergedPath.length;
       return (request) => {
         const url2 = new URL(request.url);
@@ -30119,19 +30621,19 @@ var Hono = class _Hono {
       }
       await next();
     };
-    this.#addRoute(METHOD_NAME_ALL, mergePath(path17, "*"), handler);
+    this.#addRoute(METHOD_NAME_ALL, mergePath(path18, "*"), handler);
     return this;
   }
-  #addRoute(method, path17, handler, baseRoutePath) {
+  #addRoute(method, path18, handler, baseRoutePath) {
     method = method.toUpperCase();
-    path17 = mergePath(this._basePath, path17);
+    path18 = mergePath(this._basePath, path18);
     const r = {
       basePath: baseRoutePath !== void 0 ? mergePath(this._basePath, baseRoutePath) : this._basePath,
-      path: path17,
+      path: path18,
       method,
       handler
     };
-    this.router.add(method, path17, [handler, r]);
+    this.router.add(method, path18, [handler, r]);
     this.routes.push(r);
   }
   #handleError(err, c) {
@@ -30144,10 +30646,10 @@ var Hono = class _Hono {
     if (method === "HEAD") {
       return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
     }
-    const path17 = this.getPath(request, { env });
-    const matchResult = this.router.match(method, path17);
+    const path18 = this.getPath(request, { env });
+    const matchResult = this.router.match(method, path18);
     const c = new Context(request, {
-      path: path17,
+      path: path18,
       matchResult,
       env,
       executionCtx,
@@ -30247,7 +30749,7 @@ var Hono = class _Hono {
 
 // node_modules/hono/dist/router/reg-exp-router/matcher.js
 var emptyParam = [];
-function match(method, path17) {
+function match(method, path18) {
   const matchers = this.buildAllMatchers();
   const match2 = ((method2, path22) => {
     const matcher = matchers[method2] || matchers[METHOD_NAME_ALL];
@@ -30263,7 +30765,7 @@ function match(method, path17) {
     return [matcher[1][index], match3];
   });
   this.match = match2;
-  return match2(method, path17);
+  return match2(method, path18);
 }
 
 // node_modules/hono/dist/router/reg-exp-router/node.js
@@ -30380,14 +30882,14 @@ var Trie = class {
   #index = 0;
   // dynamic path -> [handler index, param assoc]; static paths are not registered
   paths = /* @__PURE__ */ Object.create(null);
-  insert(path17, isStatic) {
+  insert(path18, isStatic) {
     if (isStatic) {
-      this.#root.insert(path17.split(""), 0, [], this.#context, true);
+      this.#root.insert(path18.split(""), 0, [], this.#context, true);
       return;
     }
     const paramAssoc = [];
     const groups = [];
-    let markedPath = path17;
+    let markedPath = path18;
     for (let i = 0; ; ) {
       let replaced = false;
       markedPath = markedPath.replace(/\{[^}]+\}/g, (m) => {
@@ -30412,7 +30914,7 @@ var Trie = class {
       }
     }
     this.#root.insert(tokens, this.#index, paramAssoc, this.#context, false);
-    this.paths[path17] = [this.#index++, paramAssoc];
+    this.paths[path18] = [this.#index++, paramAssoc];
   }
   buildRegExp() {
     let regexp = this.#root.buildRegExpStr();
@@ -30439,9 +30941,9 @@ var Trie = class {
 
 // node_modules/hono/dist/router/reg-exp-router/router.js
 var wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
-function buildWildcardRegExp(path17) {
-  return wildcardRegExpCache[path17] ??= new RegExp(
-    path17 === "*" ? "" : `^${path17.replace(
+function buildWildcardRegExp(path18) {
+  return wildcardRegExpCache[path18] ??= new RegExp(
+    path18 === "*" ? "" : `^${path18.replace(
       /\/\*$|([.\\+*[^\]$()])/g,
       (_, metaChar) => metaChar ? `\\${metaChar}` : "(?:|/.*)"
     )}$`
@@ -30450,12 +30952,12 @@ function buildWildcardRegExp(path17) {
 function clearWildcardRegExpCache() {
   wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
 }
-function findMiddleware(middleware, path17) {
+function findMiddleware(middleware, path18) {
   if (!middleware) {
     return void 0;
   }
   for (const k of Object.keys(middleware).sort((a, b) => b.length - a.length)) {
-    if (buildWildcardRegExp(k).test(path17)) {
+    if (buildWildcardRegExp(k).test(path18)) {
       return [...middleware[k]];
     }
   }
@@ -30471,14 +30973,14 @@ var RegExpRouter = class {
     this.#routes = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
     this.#tries = { [METHOD_NAME_ALL]: new Trie() };
   }
-  #insertPath(method, path17) {
+  #insertPath(method, path18) {
     try {
-      this.#tries[method].insert(path17, !/\*|\/:/.test(path17));
+      this.#tries[method].insert(path18, !/\*|\/:/.test(path18));
     } catch (e) {
-      throw e === PATH_ERROR ? new UnsupportedPathError(path17) : e;
+      throw e === PATH_ERROR ? new UnsupportedPathError(path18) : e;
     }
   }
-  add(method, path17, handler) {
+  add(method, path18, handler) {
     const middleware = this.#middleware;
     const routes = this.#routes;
     if (!middleware || !routes) {
@@ -30494,16 +30996,16 @@ var RegExpRouter = class {
         });
       });
     }
-    if (path17 === "/*") {
-      path17 = "*";
+    if (path18 === "/*") {
+      path18 = "*";
     }
-    const paramCount = (path17.match(/\/:/g) || []).length;
-    if (/\*$/.test(path17)) {
-      const re = buildWildcardRegExp(path17);
+    const paramCount = (path18.match(/\/:/g) || []).length;
+    if (/\*$/.test(path18)) {
+      const re = buildWildcardRegExp(path18);
       Object.keys(middleware).forEach((m) => {
-        if ((method === METHOD_NAME_ALL || method === m) && !middleware[m][path17]) {
-          this.#insertPath(m, path17);
-          middleware[m][path17] = findMiddleware(middleware[m], path17) || findMiddleware(middleware[METHOD_NAME_ALL], path17) || [];
+        if ((method === METHOD_NAME_ALL || method === m) && !middleware[m][path18]) {
+          this.#insertPath(m, path18);
+          middleware[m][path18] = findMiddleware(middleware[m], path18) || findMiddleware(middleware[METHOD_NAME_ALL], path18) || [];
         }
       });
       Object.keys(middleware).forEach((m) => {
@@ -30522,7 +31024,7 @@ var RegExpRouter = class {
       });
       return;
     }
-    const paths = checkOptionalParameter(path17) || [path17];
+    const paths = checkOptionalParameter(path18) || [path18];
     for (let i = 0, len = paths.length; i < len; i++) {
       const path22 = paths[i];
       Object.keys(routes).forEach((m) => {
@@ -30555,11 +31057,11 @@ var RegExpRouter = class {
     const staticMap = /* @__PURE__ */ Object.create(null);
     const handlerData = [];
     [middleware, routes].forEach((r) => {
-      for (const path17 in r) {
-        const handlers = r[path17];
-        const pathData = trie.paths[path17];
+      for (const path18 in r) {
+        const handlers = r[path18];
+        const pathData = trie.paths[path18];
         if (!pathData) {
-          staticMap[path17] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
+          staticMap[path18] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
           continue;
         }
         const paramAssoc = pathData[1];
@@ -30603,13 +31105,13 @@ var SmartRouter = class {
   constructor(init) {
     this.#routers = init.routers;
   }
-  add(method, path17, handler) {
+  add(method, path18, handler) {
     if (!this.#routes) {
       throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
     }
-    this.#routes.push([method, path17, handler]);
+    this.#routes.push([method, path18, handler]);
   }
-  match(method, path17) {
+  match(method, path18) {
     if (!this.#routes) {
       throw new Error("Fatal error");
     }
@@ -30624,7 +31126,7 @@ var SmartRouter = class {
         for (let i2 = 0, len2 = routes.length; i2 < len2; i2++) {
           router.add(...routes[i2]);
         }
-        res = router.match(method, path17);
+        res = router.match(method, path18);
       } catch (e) {
         if (e instanceof UnsupportedPathError) {
           continue;
@@ -30674,10 +31176,10 @@ var Node2 = class _Node2 {
     }
     this.#patterns = [];
   }
-  insert(method, path17, handler) {
+  insert(method, path18, handler) {
     this.#order = ++this.#order;
     let curNode = this;
-    const parts = splitRoutingPath(path17);
+    const parts = splitRoutingPath(path18);
     const possibleKeys = [];
     for (let i = 0, len = parts.length; i < len; i++) {
       const p = parts[i];
@@ -30726,12 +31228,12 @@ var Node2 = class _Node2 {
       }
     }
   }
-  search(method, path17) {
+  search(method, path18) {
     const handlerSets = [];
     this.#params = emptyParams;
     const curNode = this;
     let curNodes = [curNode];
-    const parts = splitPath(path17);
+    const parts = splitPath(path18);
     const curNodesQueue = [];
     const len = parts.length;
     let partOffsets = null;
@@ -30773,13 +31275,13 @@ var Node2 = class _Node2 {
           if (matcher instanceof RegExp) {
             if (partOffsets === null) {
               partOffsets = new Array(len);
-              let offset = path17[0] === "/" ? 1 : 0;
+              let offset = path18[0] === "/" ? 1 : 0;
               for (let p = 0; p < len; p++) {
                 partOffsets[p] = offset;
                 offset += parts[p].length + 1;
               }
             }
-            const restPathString = path17.substring(partOffsets[i]);
+            const restPathString = path18.substring(partOffsets[i]);
             const m = matcher.exec(restPathString);
             if (m) {
               params[name] = m[0];
@@ -30841,18 +31343,18 @@ var TrieRouter = class {
   constructor() {
     this.#node = new Node2();
   }
-  add(method, path17, handler) {
-    const results = checkOptionalParameter(path17);
+  add(method, path18, handler) {
+    const results = checkOptionalParameter(path18);
     if (results) {
       for (let i = 0, len = results.length; i < len; i++) {
         this.#node.insert(method, results[i], handler);
       }
       return;
     }
-    this.#node.insert(method, path17, handler);
+    this.#node.insert(method, path18, handler);
   }
-  match(method, path17) {
-    return this.#node.search(method, path17);
+  match(method, path18) {
+    return this.#node.search(method, path18);
   }
 };
 
@@ -31071,6 +31573,7 @@ function describe3(text) {
 function actionTarget(opts) {
   return {
     projectRoot: process.cwd(),
+    ...opts.id ? { id: opts.id } : {},
     ...opts.client ? { client: opts.client } : {},
     ...opts.scope ? { scope: opts.scope } : {},
     ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
@@ -31806,7 +32309,10 @@ function requiredBoolean(value, field) {
   return value;
 }
 function targetFrom(body) {
-  const { client, scope, dryRun } = body;
+  const { id, client, scope, dryRun } = body;
+  if (id !== void 0 && (typeof id !== "string" || !id.trim())) {
+    return badRequest("id must be a non-empty string");
+  }
   if (client !== void 0 && (typeof client !== "string" || !isClient(client))) {
     return badRequest(`client must be one of ${CLIENTS.join(", ")}`);
   }
@@ -31817,6 +32323,7 @@ function targetFrom(body) {
     return badRequest("dryRun must be a boolean");
   }
   return actionTarget({
+    ...id !== void 0 ? { id } : {},
     ...client !== void 0 ? { client } : {},
     ...scope !== void 0 ? { scope } : {},
     ...dryRun !== void 0 ? { dryRun } : {}
@@ -31865,16 +32372,16 @@ async function readIds(c) {
 }
 async function resolvePublicFile(urlPath) {
   const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
-  const candidate = path15.resolve(PUBLIC_DIR, rel);
-  const root = path15.resolve(PUBLIC_DIR);
-  if (candidate !== root && !candidate.startsWith(root + path15.sep)) {
+  const candidate = path16.resolve(PUBLIC_DIR, rel);
+  const root = path16.resolve(PUBLIC_DIR);
+  if (candidate !== root && !candidate.startsWith(root + path16.sep)) {
     return void 0;
   }
   if (await isFile3(candidate)) {
     return candidate;
   }
-  if (!path15.extname(rel) && await isFile3(path15.join(PUBLIC_DIR, "index.html"))) {
-    return path15.join(PUBLIC_DIR, "index.html");
+  if (!path16.extname(rel) && await isFile3(path16.join(PUBLIC_DIR, "index.html"))) {
+    return path16.join(PUBLIC_DIR, "index.html");
   }
   return void 0;
 }
@@ -31886,12 +32393,12 @@ async function isFile3(target) {
   }
 }
 function mimeFor(file) {
-  return MIME[path15.extname(file)] ?? "application/octet-stream";
+  return MIME[path16.extname(file)] ?? "application/octet-stream";
 }
 
 // src/session.ts
 import { mkdir as mkdir6, readFile as readFile8, writeFile as writeFile6 } from "node:fs/promises";
-import path16 from "node:path";
+import path17 from "node:path";
 var Session = class {
   constructor(catalog, file = SESSION_FILE) {
     this.catalog = catalog;
@@ -32030,7 +32537,7 @@ var Session = class {
     }
   }
   async write(state) {
-    await mkdir6(path16.dirname(this.file), { recursive: true });
+    await mkdir6(path17.dirname(this.file), { recursive: true });
     await writeFile6(this.file, `${JSON.stringify(state, null, 2)}
 `);
   }
