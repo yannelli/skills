@@ -9,5 +9,6 @@
   "homepage": "https://github.com/yannelli/skills",
   "repository": "https://github.com/yannelli/skills",
   "license": "MIT",
-  "keywords": []
+  "keywords": [],
+  "skills": "./skills/"
 }

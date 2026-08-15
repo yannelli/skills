@@ -1,79 +1,95 @@
-import { serve } from '@hono/node-server';
-import { serveStdio } from '@modelcontextprotocol/server/stdio';
-import { existsSync, watch } from 'node:fs';
-import { adaptPlugin } from './adapt.js';
-import { Catalog } from './catalog.js';
-import { createYardApp } from './http.js';
-import { createYardServer } from './mcp.js';
-import { writeMcpFiles } from './mcp-spec.js';
-import { PLUGINS_DIR, REPO_ROOT, YARD_PLUGIN_DIR } from './paths.js';
-import { Session } from './session.js';
+import { parseArgs, type Args } from './cli/args.js';
+import { runAdapt, runAdaptCommand } from './cli/adapt.js';
+import { runContext } from './cli/context.js';
+import { runDoctor } from './cli/doctor.js';
+import { runEmitMcp } from './cli/emit-mcp.js';
+import { runMcp } from './cli/mcp.js';
+import { runNew } from './cli/new.js';
+import { runPlugin } from './cli/plugin.js';
+import { runScan } from './cli/scan.js';
+import { runServe, runServeCommand } from './cli/serve.js';
+import { runSkill } from './cli/skill.js';
+import { printUsage } from './cli/usage.js';
 
-const DEFAULT_PORT = 4372;
+const COMMANDS: Record<string, (args: Args) => Promise<number>> = {
+  scan: runScan,
+  context: runContext,
+  doctor: runDoctor,
+  skill: runSkill,
+  plugin: runPlugin,
+  mcp: runMcp,
+  serve: runServeCommand,
+  adapt: runAdaptCommand,
+  new: runNew
+};
 
-async function main(): Promise<void> {
-  if (process.argv.includes('--emit-mcp')) {
-    await writeMcpFiles(YARD_PLUGIN_DIR);
-    console.error(`wrote ${YARD_PLUGIN_DIR}/.mcp.json`);
-    console.error(`wrote ${YARD_PLUGIN_DIR}/mcp.json`);
-    return;
+async function main(): Promise<number> {
+  const argv = process.argv.slice(2);
+
+  if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
+    printUsage();
+    return 0;
+  }
+
+  // The flag surface predates the verbs and is in people's scripts, so it is
+  // matched first and parsed exactly the way it always was.
+  if (argv.includes('--emit-mcp')) {
+    return runEmitMcp();
   }
 
   const adaptSource = flagValue('adapt');
   if (adaptSource !== undefined) {
-    if (!adaptSource) {
-      throw new Error('usage: yard --adapt <path> [--name=] [--dest=] [--register|--no-register]');
-    }
-    const register = process.argv.includes('--register')
-      ? true
-      : process.argv.includes('--no-register')
-        ? false
-        : undefined;
+    const register = argv.includes('--register') ? true : argv.includes('--no-register') ? false : undefined;
     const name = flagValue('name');
     const dest = flagValue('dest');
-    const report = await adaptPlugin({
+    return runAdapt({
       source: adaptSource,
       ...(name ? { name } : {}),
       ...(dest ? { dest } : {}),
       ...(register !== undefined ? { register } : {})
     });
-    console.log(JSON.stringify(report, null, 2));
-    return;
   }
 
-  const stdio = process.argv.includes('--stdio');
-  const portFlag = process.argv.find((arg) => arg.startsWith('--port='));
-  const port = portFlag ? Number(portFlag.slice('--port='.length)) : DEFAULT_PORT;
-
-  const catalog = new Catalog();
-  const session = new Session(catalog);
-  await catalog.load();
-
-  if (stdio) {
-    console.error('yard listening on stdio');
-    serveStdio(() => createYardServer(catalog, session));
-    return;
+  const first = argv[0];
+  if (first === undefined) {
+    printUsage();
+    return 0;
   }
 
-  const { app, close } = createYardApp(catalog, session);
-  if (existsSync(PLUGINS_DIR)) {
-    watch(PLUGINS_DIR, { recursive: true }, () => catalog.invalidate());
-  }
-  if (existsSync(REPO_ROOT)) {
-    watch(REPO_ROOT, { recursive: false }, () => catalog.invalidate());
+  if (first.startsWith('-')) {
+    // The legacy surface is exactly --stdio and --port=<port>. Anything else
+    // leading with a dash used to start an HTTP server, which meant a typo like
+    // `yard --jsonn` silently bound a port instead of saying what was wrong.
+    const unknown = argv.find((arg) => arg !== '--stdio' && !arg.startsWith('--port='));
+    if (unknown !== undefined) {
+      process.stderr.write(
+        unknown === '--port'
+          ? 'yard: --port needs a value, as --port=<port>\n'
+          : `yard: unknown flag "${unknown}"\n`
+      );
+      printUsage(process.stderr);
+      return 1;
+    }
+    const portFlag = argv.find((arg) => arg.startsWith('--port='));
+    const port = portFlag === undefined ? undefined : Number(portFlag.slice('--port='.length));
+    if (port !== undefined && !Number.isInteger(port)) {
+      process.stderr.write(`yard: --port must be a whole number, got "${portFlag?.slice('--port='.length)}"\n`);
+      return 1;
+    }
+    return runServe({
+      stdio: argv.includes('--stdio'),
+      ...(port !== undefined ? { port } : {})
+    });
   }
 
-  serve({ fetch: app.fetch, hostname: '127.0.0.1', port }, (info) => {
-    console.error(`yard  http://127.0.0.1:${info.port}`);
-    console.error(`mcp   http://127.0.0.1:${info.port}/mcp`);
-  });
+  const command = COMMANDS[first];
+  if (!command) {
+    process.stderr.write(`yard: unknown command "${first}"\n`);
+    printUsage(process.stderr);
+    return 1;
+  }
 
-  const shutdown = async (): Promise<void> => {
-    await close();
-    process.exit(0);
-  };
-  process.on('SIGINT', () => void shutdown());
-  process.on('SIGTERM', () => void shutdown());
+  return command(parseArgs(argv));
 }
 
 function flagValue(name: string): string | undefined {
@@ -93,4 +109,16 @@ function flagValue(name: string): string | undefined {
   return next;
 }
 
-void main();
+main().then(
+  (code) => {
+    // Never process.exit here: `serve` has already returned with the listener
+    // still open, and killing it would defeat the point.
+    process.exitCode = code;
+  },
+  (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    // A usage line already names the command, so it does not want a prefix.
+    process.stderr.write(message.startsWith('usage:') ? `${message}\n` : `yard: ${message}\n`);
+    process.exitCode = 1;
+  }
+);

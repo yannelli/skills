@@ -9,5 +9,10 @@
   "homepage": "https://github.com/yannelli/skills",
   "repository": "https://github.com/yannelli/skills",
   "license": "MIT",
-  "keywords": ["review", "example", "scaffold"]
+  "keywords": [
+    "review",
+    "example",
+    "scaffold"
+  ],
+  "skills": "./skills/"
 }

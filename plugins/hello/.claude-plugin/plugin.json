@@ -11,6 +11,9 @@
   "homepage": "https://github.com/yannelli/skills",
   "repository": "https://github.com/yannelli/skills",
   "license": "MIT",
-  "keywords": ["hello", "example", "scaffold"],
-  "hooks": "./hooks/claude-hooks.json"
+  "keywords": [
+    "hello",
+    "example",
+    "scaffold"
+  ]
 }

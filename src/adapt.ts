@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { AGENT_MCP_SCHEMA, type AgentMcpEntry, type AgentMcpFile, type ClaudeMcpFile } from './mcp-spec.js';
@@ -13,15 +13,27 @@ const AUTHOR = {
   url: 'https://github.com/yannelli'
 };
 
+/**
+ * Claude events paired with their Cursor *user-level* counterparts, for
+ * `~/.cursor/hooks.json` and `<project>/.cursor/hooks.json`. Plugin hooks do
+ * not go through this map — those stay PascalCase in every client.
+ *
+ * Only genuine counterparts are listed. Events with no equivalent on the other
+ * side (Notification, PermissionRequest, beforeShellExecution, afterFileEdit,
+ * the Tab events) are reported as dropped rather than guessed at, because a
+ * silently invented event name is a hook that never fires.
+ */
 const CLAUDE_TO_CURSOR_EVENTS: Record<string, string> = {
   SessionStart: 'sessionStart',
   SessionEnd: 'sessionEnd',
   UserPromptSubmit: 'beforeSubmitPrompt',
   PreToolUse: 'preToolUse',
   PostToolUse: 'postToolUse',
-  Notification: 'notification',
-  Stop: 'stop',
-  SubagentStop: 'subagentStop'
+  PostToolUseFailure: 'postToolUseFailure',
+  SubagentStart: 'subagentStart',
+  SubagentStop: 'subagentStop',
+  PreCompact: 'preCompact',
+  Stop: 'stop'
 };
 
 const SUPPORT_DIRS = ['scripts', 'rules', 'agents', 'commands', 'hooks'] as const;
@@ -53,7 +65,8 @@ type ManifestSeed = {
   homepage?: string;
   repository?: string;
   hooks?: string;
-  mcpServers?: unknown;
+  /** `mcpServers` block to inline into `.cursor-plugin/plugin.json`. */
+  cursorMcp?: Record<string, unknown>;
 };
 
 export async function adaptPlugin(input: AdaptInput): Promise<AdaptReport> {
@@ -108,11 +121,25 @@ export function kebabName(value: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-export function claudeHooksToCursor(raw: unknown): { hooks: Record<string, Array<{ command: string }>> } {
+export type CursorUserHooks = {
+  version: 1;
+  hooks: Record<string, Array<{ command: string }>>;
+  /** Claude events with no Cursor counterpart. Nothing was emitted for these. */
+  dropped: string[];
+};
+
+/** Convert Claude hooks into the developer's own `.cursor/hooks.json`. */
+export function claudeHooksToCursor(raw: unknown): CursorUserHooks {
   const events = hookEvents(raw);
   const hooks: Record<string, Array<{ command: string }>> = {};
+  const dropped: string[] = [];
+
   for (const [event, entries] of Object.entries(events)) {
-    const mapped = CLAUDE_TO_CURSOR_EVENTS[event] ?? camelCase(event);
+    const mapped = CLAUDE_TO_CURSOR_EVENTS[event];
+    if (!mapped) {
+      dropped.push(event);
+      continue;
+    }
     const commands = entries
       .flatMap(extractCommands)
       .map(toCursorCommand)
@@ -122,24 +149,34 @@ export function claudeHooksToCursor(raw: unknown): { hooks: Record<string, Array
       hooks[mapped] = commands;
     }
   }
-  return { hooks };
+
+  return { version: 1, hooks, dropped };
 }
 
-export function cursorHooksToClaude(raw: unknown): {
-  description: string;
+export type ClaudeHooksFile = {
   hooks: Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>>;
-} {
+  dropped: string[];
+};
+
+/** Convert a `.cursor/hooks.json` into the PascalCase shape plugins use. */
+export function cursorHooksToClaude(raw: unknown): ClaudeHooksFile {
   const events = hookEvents(raw);
   const hooks: Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>> = {};
+  const dropped: string[] = [];
+
   for (const [event, entries] of Object.entries(events)) {
-    const mapped =
-      Object.entries(CLAUDE_TO_CURSOR_EVENTS).find(([, cursor]) => cursor === event)?.[0] ?? pascalCase(event);
+    const mapped = Object.entries(CLAUDE_TO_CURSOR_EVENTS).find(([, cursor]) => cursor === event)?.[0];
+    if (!mapped) {
+      dropped.push(event);
+      continue;
+    }
     const commands = entries.flatMap(extractCommands).map(toClaudeCommand).filter((command) => command.length > 0);
     if (commands.length) {
       hooks[mapped] = [{ hooks: commands.map((command) => ({ type: 'command', command })) }];
     }
   }
-  return { description: 'Adapted from Cursor hooks', hooks };
+
+  return { hooks, dropped };
 }
 
 export function claudeMcpToAgent(raw: unknown): AgentMcpFile {
@@ -202,15 +239,18 @@ async function seedFrom(source: string, dest: string, discovered: { name: string
     (await readJson(path.join(dirOf(source), '.claude-plugin', 'plugin.json'))) ??
     (await readJson(path.join(dest, '.claude-plugin', 'plugin.json')));
   const keywords = arrayField(claude, 'keywords');
-  const hooksPath = (await isFile(path.join(dest, 'hooks', 'claude-hooks.json')))
-    ? './hooks/claude-hooks.json'
-    : stringField(claude, 'hooks');
+  // hooks/hooks.json is the auto-discovered default in every client, so the
+  // manifests only need a `hooks` field when the source pointed somewhere else.
+  const declaredHooks = stringField(claude, 'hooks');
+  const hooksPath =
+    declaredHooks && !/^\.\/hooks\/(hooks|claude-hooks)\.json$/.test(declaredHooks) ? declaredHooks : undefined;
   const homepage = stringField(claude, 'homepage');
   const repository = stringField(claude, 'repository');
   const mcp =
-    (await readJson(path.join(dest, 'mcp.json'))) ??
     (await readJson(path.join(dest, '.mcp.json'))) ??
+    (await readJson(path.join(dest, 'mcp.json'))) ??
     (claude && 'mcpServers' in claude ? { mcpServers: claude.mcpServers } : undefined);
+  const hasMcp = Boolean(mcp && Object.keys(serverMap(mcp)).length);
   return {
     name: discovered.name,
     description: discovered.description,
@@ -220,7 +260,7 @@ async function seedFrom(source: string, dest: string, discovered: { name: string
     ...(homepage ? { homepage } : {}),
     ...(repository ? { repository } : {}),
     ...(hooksPath ? { hooks: hooksPath } : {}),
-    ...(mcp ? { mcpServers: toCodexInline(mcp) } : {})
+    ...(hasMcp ? { cursorMcp: toCursorInline(mcp) } : {})
   };
 }
 
@@ -244,6 +284,9 @@ function manifestsFor(seed: ManifestSeed): Record<string, string> {
     $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
     ...shared
   };
+  // Cursor reads its MCP servers from the manifest itself — it loads neither
+  // .mcp.json nor mcp.json — so they have to be inlined here or the plugin
+  // installs into Cursor with no servers at all.
   const cursor = {
     name: shared.name,
     description: shared.description,
@@ -252,13 +295,16 @@ function manifestsFor(seed: ManifestSeed): Record<string, string> {
     homepage: shared.homepage,
     repository: shared.repository,
     license: shared.license,
-    keywords: shared.keywords
+    keywords: shared.keywords,
+    skills: './skills/',
+    ...(seed.hooks ? { hooks: seed.hooks } : {}),
+    ...(seed.cursorMcp ? { mcpServers: seed.cursorMcp } : {})
   };
   const codex = {
     ...shared,
     skills: './skills/',
     ...(seed.hooks ? { hooks: seed.hooks } : {}),
-    ...(seed.mcpServers ? { mcpServers: seed.mcpServers } : {})
+    ...(seed.cursorMcp ? { mcpServers: './.mcp.json' } : {})
   };
   return {
     'plugin.json': json(agent),
@@ -334,6 +380,17 @@ async function copySupport(
   }
 }
 
+/**
+ * Plugin hooks are a single `hooks/hooks.json` in the PascalCase Claude shape.
+ *
+ * All three clients read that same file from a plugin — verified against
+ * Cursor's own published plugins, which ship PascalCase events and
+ * `${CLAUDE_PLUGIN_ROOT}` commands. The camelCase form is a different surface
+ * entirely: the developer's own `.cursor/hooks.json`, which is not a plugin
+ * file. So the only conversion to do here is the legacy one, for sources that
+ * predate that finding and carry a camelCase `hooks/hooks.json` or a split-out
+ * `hooks/claude-hooks.json`.
+ */
 async function adaptHooks(
   source: string,
   dest: string,
@@ -342,41 +399,45 @@ async function adaptHooks(
   notes: string[]
 ): Promise<void> {
   const sourceDir = dirOf(source);
-  const destClaude = path.join(dest, 'hooks', 'claude-hooks.json');
-  const destCursor = path.join(dest, 'hooks', 'hooks.json');
+  const destHooks = path.join(dest, 'hooks', 'hooks.json');
+  const legacySplit = path.join(dest, 'hooks', 'claude-hooks.json');
 
   const claudeRaw = await firstClaudeHooks([
+    path.join(sourceDir, 'hooks', 'hooks.json'),
     path.join(sourceDir, 'hooks', 'claude-hooks.json'),
     path.join(sourceDir, '.claude-plugin', 'hooks.json'),
-    path.join(sourceDir, 'hooks', 'hooks.json'),
-    destClaude,
-    destCursor
-  ]);
-  const cursorRaw = await firstCursorHooks([
-    path.join(sourceDir, 'hooks', 'hooks.json'),
-    destCursor
+    destHooks,
+    legacySplit
   ]);
 
-  if (claudeRaw && (await isClaudeNamedHooks(destCursor))) {
-    await writeMissing(dest, 'hooks/claude-hooks.json', json(claudeRaw), wrote, skipped);
-    await writeFile(destCursor, json(claudeHooksToCursor(claudeRaw)));
-    wrote.push('hooks/hooks.json');
-    notes.push('moved Claude-shaped hooks.json to claude-hooks.json and wrote Cursor hooks');
+  if (claudeRaw) {
+    // copySupport may already have copied a camelCase hooks.json across, so an
+    // existing destination file only counts as correct if it is Claude-shaped.
+    if (await isClaudeNamedHooks(destHooks)) {
+      skipped.push('hooks/hooks.json');
+    } else {
+      await mkdir(path.dirname(destHooks), { recursive: true });
+      await writeFile(destHooks, json(claudeRaw));
+      wrote.push('hooks/hooks.json');
+      notes.push('wrote plugin hooks in the PascalCase shape every client reads');
+    }
+    if (await exists(legacySplit)) {
+      await rm(legacySplit);
+      notes.push('removed hooks/claude-hooks.json — plugin hooks are a single hooks/hooks.json');
+    }
     return;
   }
 
-  if (claudeRaw) {
-    await writeMissing(dest, 'hooks/hooks.json', json(claudeHooksToCursor(claudeRaw)), wrote, skipped);
-    if (!(await exists(destClaude))) {
-      await writeMissing(dest, 'hooks/claude-hooks.json', json(claudeRaw), wrote, skipped);
+  const cursorRaw = await firstCursorHooks([path.join(sourceDir, 'hooks', 'hooks.json'), destHooks]);
+  if (cursorRaw) {
+    const { hooks, dropped } = cursorHooksToClaude(cursorRaw);
+    await mkdir(path.dirname(destHooks), { recursive: true });
+    await writeFile(destHooks, json({ hooks }));
+    wrote.push('hooks/hooks.json');
+    notes.push('converted camelCase hooks to the PascalCase plugin shape');
+    if (dropped.length) {
+      notes.push(`dropped Cursor-only hook events with no plugin equivalent: ${dropped.join(', ')}`);
     }
-    if (wrote.includes('hooks/hooks.json')) {
-      notes.push('wrote Cursor hooks from Claude hooks');
-    }
-  }
-  if (cursorRaw && !(await exists(destClaude))) {
-    await writeMissing(dest, 'hooks/claude-hooks.json', json(cursorHooksToClaude(cursorRaw)), wrote, skipped);
-    notes.push('wrote Claude hooks from Cursor hooks');
   }
 }
 
@@ -540,22 +601,19 @@ function toAgentEntry(entry: unknown): AgentMcpEntry {
   };
 }
 
-function toCodexInline(raw: unknown): Record<string, unknown> {
+/**
+ * Cursor resolves a plugin's relative paths against the plugin root already, so
+ * its inline entries carry neither `${CLAUDE_PLUGIN_ROOT}` nor an explicit cwd.
+ */
+function toCursorInline(raw: unknown): Record<string, unknown> {
   const servers = serverMap(raw);
   return Object.fromEntries(
     Object.entries(servers).map(([key, entry]) => {
       const agent = toAgentEntry(entry);
       if (agent.url) {
-        return [key, { url: agent.url, type: agent.type }];
+        return [key, { type: agent.type, url: agent.url }];
       }
-      return [
-        key,
-        {
-          command: agent.command,
-          args: agent.args,
-          cwd: '.'
-        }
-      ];
+      return [key, { command: agent.command, args: agent.args }];
     })
   );
 }
@@ -608,14 +666,6 @@ function agentEnv(value: unknown): Record<string, string> | undefined {
 
 function claudeEnv(value: unknown): Record<string, string> | undefined {
   return isStringRecord(value) && Object.keys(value).length ? value : undefined;
-}
-
-function camelCase(value: string): string {
-  return value.charAt(0).toLowerCase() + value.slice(1);
-}
-
-function pascalCase(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function stringField(raw: unknown, key: string): string | undefined {

@@ -160,28 +160,32 @@ async function scanHooks(plugin: PluginRecord): Promise<ArtifactRecord[]> {
   if (!(await exists(dir))) {
     return [];
   }
-  const records: ArtifactRecord[] = [];
-  for (const fileName of ['hooks.json', 'claude-hooks.json']) {
-    const file = path.join(dir, fileName);
-    if (!(await exists(file))) {
-      continue;
-    }
-    const raw = await readFile(file, 'utf8');
-    const parsed = JSON.parse(raw) as { description?: string };
-    const name = fileName === 'claude-hooks.json' ? 'claude-hooks' : 'hooks';
-    records.push({
-      id: artifactId(plugin.name, 'hook', name),
+  // One file, PascalCase, read by Claude Code, Codex, and Cursor alike.
+  const file = path.join(dir, 'hooks.json');
+  if (!(await exists(file))) {
+    return [];
+  }
+  const raw = await readFile(file, 'utf8');
+  let description = `${plugin.name} hooks`;
+  try {
+    description = (JSON.parse(raw) as { description?: string }).description ?? description;
+  } catch {
+    // A malformed hooks file still belongs in the catalog so doctor can report
+    // it; only the description is lost.
+  }
+  return [
+    {
+      id: artifactId(plugin.name, 'hook', 'hooks'),
       plugin: plugin.name,
       kind: 'hook',
-      name,
-      description: parsed.description ?? `${plugin.name} ${name}`,
+      name: 'hooks',
+      description,
       path: file,
       version: plugin.version,
       body: raw,
       raw
-    });
-  }
-  return records;
+    }
+  ];
 }
 
 async function scanMcp(plugin: PluginRecord): Promise<ArtifactRecord[]> {

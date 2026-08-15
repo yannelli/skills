@@ -3,11 +3,36 @@ import * as z from 'zod';
 import { adaptPlugin } from './adapt.js';
 import type { Catalog } from './catalog.js';
 import { indexOf } from './catalog.js';
+import { actionTarget, DEFAULT_ROW_LIMIT, ENV_KINDS, summarizeInventory, toEnvKind } from './env-api.js';
+import { setMcpEnabled, setPluginEnabled, setSkillEnabled, setSkillVisibility } from './env/actions.js';
+import { buildContextReport } from './env/context.js';
+import { diagnose } from './env/doctor.js';
+import { scanEnvironment } from './env/inventory.js';
+import { formatTokens } from './env/tokens.js';
+import { CLIENTS, SKILL_VISIBILITIES } from './env/types.js';
 import { searchArtifacts } from './search.js';
 import type { Session } from './session.js';
 import { ARTIFACT_KINDS } from './types.js';
 
 const KindSchema = z.enum(ARTIFACT_KINDS);
+
+/**
+ * The schema advertises the canonical plural vocabulary, which is what a model
+ * reading it will send. It also quietly accepts the singular the CLI uses
+ * (`--kind=skill`), because a model that has read the docs guessing `skill`
+ * should not have to spend a turn learning that this surface pluralises. Same
+ * rule the HTTP query parameter follows.
+ */
+const EnvKindSchema = z.preprocess(
+  (value) => (typeof value === 'string' ? (toEnvKind(value) ?? value) : value),
+  z.enum(ENV_KINDS)
+);
+const ClientSchema = z.enum(CLIENTS);
+const ScopeSchema = z.enum(['user', 'project', 'local']);
+const VisibilitySchema = z.enum(SKILL_VISIBILITIES);
+
+/** Context and doctor reports are as long as the setup is bad; keep them readable. */
+const MAX_REPORT_LINES = 25;
 
 export function createYardServer(catalog: Catalog, session: Session): McpServer {
   const server = new McpServer({
@@ -206,6 +231,175 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
       catalog.invalidate();
       const snap = await catalog.load();
       return textResult({ plugins: snap.plugins.length, artifacts: snap.artifacts.length });
+    }
+  );
+
+  server.registerTool(
+    'env_inventory',
+    {
+      title: 'List the installed agent environment',
+      description:
+        'What Claude Code, Codex, and Cursor will actually load here: skills, plugins, MCP servers, hooks, subagents, commands, and memory files. Use it when the user asks what is installed, why something is or is not available, or before changing any client config. Returns counts for every kind plus at most `limit` rows, so pass `kind` to see one kind in full. Reads config files only.',
+      inputSchema: z.object({
+        client: ClientSchema.optional().describe('Restrict the scan to one client. Defaults to every installed client.'),
+        kind: EnvKindSchema.optional().describe('Restrict the rows to one kind. Counts always cover every kind.'),
+        limit: z.number().int().min(1).max(200).optional().describe(`Rows to return. Defaults to ${DEFAULT_ROW_LIMIT}.`)
+      }),
+      annotations: { readOnlyHint: true, idempotentHint: true }
+    },
+    async ({ client, kind, limit }) => {
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
+      return textResult(
+        summarizeInventory(inventory, {
+          ...(kind ? { kind } : {}),
+          ...(limit !== undefined ? { limit } : {})
+        })
+      );
+    }
+  );
+
+  server.registerTool(
+    'env_context',
+    {
+      title: 'Price the context window',
+      description:
+        'Estimated tokens every turn spends on skill listings, MCP tool schemas, subagents, commands, and memory files, with the biggest offenders and the command that turns each one off. Use it when the user asks why context is tight or what their setup costs. Nothing is written. With probe true it starts the user’s configured MCP servers to read their real tool schemas, which runs those commands — leave it off unless the user asked for exact MCP numbers.',
+      inputSchema: z.object({
+        client: ClientSchema.optional().describe('Price one client only. Defaults to every installed client.'),
+        probe: z
+          .boolean()
+          .optional()
+          .describe('Start each configured MCP server to measure it instead of estimating. Defaults to false.')
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    async ({ client, probe }) => {
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
+      const report = await buildContextReport(inventory, { probe: probe === true });
+      const lines = report.lines.slice(0, MAX_REPORT_LINES);
+      return textResult({
+        projectRoot: report.projectRoot,
+        clients: report.clients,
+        total: report.total,
+        totalHuman: formatTokens(report.total),
+        byKind: report.byKind,
+        byClient: report.byClient,
+        probed: report.probed,
+        notes: report.notes,
+        lines,
+        omitted: report.lines.length - lines.length
+      });
+    }
+  );
+
+  server.registerTool(
+    'env_doctor',
+    {
+      title: 'Diagnose the agent setup',
+      description:
+        'Find what is quietly broken: hooks pointing at deleted scripts, skills the model can never see, duplicate skill names, plugins that are enabled but not installed, unparseable config. Use it when a skill, hook, or MCP server does not behave as the user expects. Nothing is written. With probe true it starts the user’s configured MCP servers to find out which ones actually come up, which runs those commands — leave it off unless the user asked.',
+      inputSchema: z.object({
+        client: ClientSchema.optional().describe('Diagnose one client only. Defaults to every installed client.'),
+        probe: z.boolean().optional().describe('Start each configured MCP server to check it responds. Defaults to false.')
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    async ({ client, probe }) => {
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
+      const diagnoses = await diagnose(inventory, { probe: probe === true });
+      const shown = diagnoses.slice(0, MAX_REPORT_LINES);
+      return textResult({
+        counts: {
+          error: diagnoses.filter((item) => item.severity === 'error').length,
+          warning: diagnoses.filter((item) => item.severity === 'warning').length,
+          info: diagnoses.filter((item) => item.severity === 'info').length
+        },
+        probed: probe === true,
+        diagnoses: shown,
+        omitted: diagnoses.length - shown.length
+      });
+    }
+  );
+
+  server.registerTool(
+    'env_set_skill',
+    {
+      title: 'Set a skill visibility or enablement',
+      description:
+        'Rewrite the user’s real client config to change how a skill is exposed. `visibility` is Claude Code’s setting: on, name-only (the model sees the name but not the description), user-invocable-only (only a slash command reaches it), or off. `enabled` instead moves the skill directory in or out of the client’s skills folder, which is all Codex offers. Pass dryRun to see the file that would change without touching it.',
+      inputSchema: z.object({
+        skill: z.string().describe('Skill name, or plugin:name for a plugin skill'),
+        visibility: VisibilitySchema.optional(),
+        enabled: z.boolean().optional().describe('Move the skill directory instead of setting a visibility'),
+        client: ClientSchema.optional().describe('Required only when the name exists in more than one client'),
+        scope: ScopeSchema.optional().describe('Which settings file to write. Defaults to user.'),
+        dryRun: z.boolean().optional()
+      })
+    },
+    async ({ skill, visibility, enabled, client, scope, dryRun }) => {
+      const target = actionTarget({
+        ...(client ? { client } : {}),
+        ...(scope ? { scope } : {}),
+        ...(dryRun !== undefined ? { dryRun } : {})
+      });
+      if (visibility !== undefined && enabled !== undefined) {
+        throw new Error('pass visibility or enabled, not both');
+      }
+      if (visibility !== undefined) {
+        return textResult(await setSkillVisibility({ ...target, skill, visibility }));
+      }
+      if (enabled !== undefined) {
+        return textResult(await setSkillEnabled({ ...target, skill, enabled }));
+      }
+      throw new Error('visibility or enabled is required');
+    }
+  );
+
+  server.registerTool(
+    'env_set_plugin',
+    {
+      title: 'Enable or disable an installed plugin',
+      description:
+        'Rewrite the user’s real Claude Code settings to turn an installed plugin on or off, which also turns off the skills, hooks, and MCP servers it brings. Pass dryRun to see the file that would change without touching it.',
+      inputSchema: z.object({
+        plugin: z.string().describe('Plugin name, or name@marketplace'),
+        enabled: z.boolean(),
+        client: ClientSchema.optional().describe('Required only when the name exists in more than one client'),
+        scope: ScopeSchema.optional().describe('Which settings file to write. Defaults to user.'),
+        dryRun: z.boolean().optional()
+      })
+    },
+    async ({ plugin, enabled, client, scope, dryRun }) => {
+      const target = actionTarget({
+        ...(client ? { client } : {}),
+        ...(scope ? { scope } : {}),
+        ...(dryRun !== undefined ? { dryRun } : {})
+      });
+      return textResult(await setPluginEnabled({ ...target, plugin, enabled }));
+    }
+  );
+
+  server.registerTool(
+    'env_set_mcp',
+    {
+      title: 'Enable or disable an MCP server',
+      description:
+        'Rewrite the user’s real client config so a configured MCP server is loaded or not. This is the biggest single lever on context cost — an MCP server pays for every tool schema on every turn, whether or not it is used. Pass dryRun to see the file that would change without touching it.',
+      inputSchema: z.object({
+        server: z.string().describe('Server name as it appears in the client config'),
+        enabled: z.boolean(),
+        client: ClientSchema.optional().describe('Required only when the name exists in more than one client'),
+        scope: ScopeSchema.optional().describe('Which config file to write. Defaults to user.'),
+        dryRun: z.boolean().optional()
+      })
+    },
+    async ({ server: name, enabled, client, scope, dryRun }) => {
+      const target = actionTarget({
+        ...(client ? { client } : {}),
+        ...(scope ? { scope } : {}),
+        ...(dryRun !== undefined ? { dryRun } : {})
+      });
+      return textResult(await setMcpEnabled({ ...target, server: name, enabled }));
     }
   );
 

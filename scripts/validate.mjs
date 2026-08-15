@@ -147,36 +147,80 @@ for (const entry of loaded[0]?.plugins ?? []) {
     }
   }
 
-  for (const hookFile of ['hooks/hooks.json', 'hooks/claude-hooks.json']) {
-    const file = path.join(pluginRoot, hookFile);
-    if (await exists(file)) {
-      JSON.parse(await readFile(file, 'utf8'));
+  // Plugin hooks are a single PascalCase hooks/hooks.json. Claude Code, Codex,
+  // and Cursor all read that same file from a plugin; the camelCase form is the
+  // developer's own .cursor/hooks.json, which is not a plugin file.
+  if (await exists(path.join(pluginRoot, 'hooks/claude-hooks.json'))) {
+    fail(`${entry.name} still has hooks/claude-hooks.json — plugin hooks belong in hooks/hooks.json`);
+  }
+  const hooksFile = path.join(pluginRoot, 'hooks/hooks.json');
+  if (await exists(hooksFile)) {
+    const hooks = JSON.parse(await readFile(hooksFile, 'utf8'));
+    for (const event of Object.keys(hooks.hooks ?? {})) {
+      if (event[0] !== event[0].toUpperCase()) {
+        fail(`${entry.name} hooks/hooks.json event "${event}" must be PascalCase`);
+      }
     }
   }
 
+  const cursorManifest = JSON.parse(
+    await readFile(path.join(pluginRoot, '.cursor-plugin/plugin.json'), 'utf8')
+  );
+  const codexManifest = JSON.parse(
+    await readFile(path.join(pluginRoot, '.codex-plugin/plugin.json'), 'utf8')
+  );
+  if (await exists(skillsDir)) {
+    for (const [label, manifest] of [
+      ['.cursor-plugin', cursorManifest],
+      ['.codex-plugin', codexManifest]
+    ]) {
+      if (!manifest.skills) {
+        fail(`${entry.name} ${label}/plugin.json must declare "skills" so the client finds skills/`);
+      }
+    }
+  }
+
+  // .mcp.json is what Claude Code and Codex load. Cursor loads neither MCP
+  // file — it reads mcpServers out of its own manifest — so a plugin shipping
+  // MCP has to inline them there too.
   const claudeMcp = path.join(pluginRoot, '.mcp.json');
   const agentMcp = path.join(pluginRoot, 'mcp.json');
-  const hasClaudeMcp = await exists(claudeMcp);
-  const hasAgentMcp = await exists(agentMcp);
-  if (hasClaudeMcp !== hasAgentMcp) {
-    fail(`${entry.name} must ship both .mcp.json and mcp.json`);
+  if (!(await exists(claudeMcp)) && (await exists(agentMcp))) {
+    fail(`${entry.name} ships mcp.json but no .mcp.json, so Claude Code and Codex load nothing`);
   }
-  if (hasClaudeMcp && hasAgentMcp) {
+  if (await exists(claudeMcp)) {
     const claude = JSON.parse(await readFile(claudeMcp, 'utf8'));
-    const agent = JSON.parse(await readFile(agentMcp, 'utf8'));
     const claudeKeys = mcpKeys(claude);
-    const agentKeys = mcpKeys(agent);
-    if (JSON.stringify(claudeKeys) !== JSON.stringify(agentKeys)) {
-      fail(`${entry.name} MCP server keys diverge: ${claudeKeys.join(',')} vs ${agentKeys.join(',')}`);
-    }
-    if (agent.$schema !== 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json') {
-      fail(`${entry.name} mcp.json missing Agent Plugins $schema`);
-    }
-    for (const key of agentKeys) {
-      const server = agent.mcpServers?.[key];
-      if (!server?.type) {
-        fail(`${entry.name} mcp.json ${key} needs an explicit type`);
+
+    if (await exists(agentMcp)) {
+      const agent = JSON.parse(await readFile(agentMcp, 'utf8'));
+      const agentKeys = mcpKeys(agent);
+      if (JSON.stringify(claudeKeys) !== JSON.stringify(agentKeys)) {
+        fail(`${entry.name} MCP server keys diverge: ${claudeKeys.join(',')} vs ${agentKeys.join(',')}`);
       }
+      if (agent.$schema !== 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json') {
+        fail(`${entry.name} mcp.json missing Agent Plugins $schema`);
+      }
+      for (const key of agentKeys) {
+        if (!agent.mcpServers?.[key]?.type) {
+          fail(`${entry.name} mcp.json ${key} needs an explicit type`);
+        }
+      }
+    }
+
+    const cursorKeys = mcpKeys(cursorManifest.mcpServers ?? {});
+    if (JSON.stringify(cursorKeys) !== JSON.stringify(claudeKeys)) {
+      fail(
+        `${entry.name} .cursor-plugin/plugin.json must inline mcpServers ${claudeKeys.join(',')} (found ${
+          cursorKeys.join(',') || 'none'
+        })`
+      );
+    }
+    if (JSON.stringify(cursorManifest.mcpServers ?? {}).includes('CLAUDE_PLUGIN_ROOT')) {
+      fail(`${entry.name} .cursor-plugin/plugin.json inlines \${CLAUDE_PLUGIN_ROOT}, which Cursor does not expand`);
+    }
+    if (codexManifest.mcpServers !== './.mcp.json' && typeof codexManifest.mcpServers !== 'object') {
+      fail(`${entry.name} .codex-plugin/plugin.json must point mcpServers at "./.mcp.json"`);
     }
   }
 }
