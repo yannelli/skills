@@ -2437,6 +2437,7 @@ async function probeMcpServer(entry, opts = {}) {
   );
   const totalTokens = outcome.tools.reduce((sum, tool) => sum + tool.tokens, 0);
   return {
+    id: entry.id,
     server: entry.name,
     ok: outcome.ok,
     durationMs: Date.now() - started,
@@ -2460,6 +2461,7 @@ async function probeAll(entries, opts = {}) {
       const entry = entries[index];
       if (!entry) {
         results[index] = {
+          id: `entry ${index}`,
           server: `entry ${index}`,
           ok: false,
           error: "missing entry",
@@ -2472,6 +2474,7 @@ async function probeAll(entries, opts = {}) {
       results[index] = await probeMcpServer(entry, {
         ...opts.timeoutMs !== void 0 ? { timeoutMs: opts.timeoutMs } : {}
       }).catch((error2) => ({
+        id: entry.id,
         server: entry.name,
         ok: false,
         error: messageOf(error2),
@@ -2823,7 +2826,7 @@ async function buildContextReport(inventory, options = {}) {
     });
   }
   for (const server of enabledServers) {
-    const probe = probes.find((result) => result.server === server.id);
+    const probe = probes.find((result) => result.id === server.id);
     if (probe?.ok) {
       lines.push({
         id: server.id,
@@ -5084,7 +5087,7 @@ async function checkMcpReachable(inventory, options) {
     ...options.probeTimeoutMs !== void 0 ? { timeoutMs: options.probeTimeoutMs } : {}
   });
   return results.filter((result) => !result.ok).map((result) => {
-    const server = enabled.find((item) => item.id === result.server);
+    const server = enabled.find((item) => item.id === result.id);
     return {
       severity: "error",
       client: server?.client ?? "claude",

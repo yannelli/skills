@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 import { buildContextReport, topOffenders } from './context.js';
 import { estimateTokens } from './tokens.js';
@@ -250,4 +253,97 @@ test('topOffenders returns only the lines that carry a remedy', async () => {
 
   assert.equal(offenders[0]?.kind, 'mcp');
   assert.equal(topOffenders(report, 1).length, 1);
+});
+
+/**
+ * A real probe, against a fixture server started for the test.
+ *
+ * Everything above prices MCP from config alone, and that gap let a defect
+ * ship: probe results were correlated by server name while the ledger looked
+ * them up by entry id, so every probe silently came back "failed" and `--probe`
+ * reported the same flat estimate as not probing at all.
+ */
+const FIXTURE_SERVER = `
+let buffer = '';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  let newline = buffer.indexOf('\\n');
+  while (newline !== -1) {
+    const line = buffer.slice(0, newline).trim();
+    buffer = buffer.slice(newline + 1);
+    newline = buffer.indexOf('\\n');
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.method === 'initialize') {
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {
+        protocolVersion: '2025-06-18', capabilities: { tools: {} },
+        serverInfo: { name: 'fixture', version: '1.0.0' } } }) + '\\n');
+    }
+    if (message.method === 'tools/list') {
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [
+        { name: 'search', description: 'Search the corpus.', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } },
+        { name: 'fetch', description: 'Fetch one document by id.', inputSchema: { type: 'object', properties: { id: { type: 'string' } } } }
+      ] } }) + '\\n');
+    }
+  }
+});
+`;
+
+test('probing prices a server from its real tool list, not the flat estimate', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'yard-context-probe-'));
+  try {
+    const server = path.join(dir, 'server.mjs');
+    await writeFile(server, FIXTURE_SERVER, 'utf8');
+
+    const entry: McpEntry = {
+      id: 'claude:project:fixture',
+      client: 'claude',
+      scope: 'project',
+      name: 'fixture',
+      transport: 'stdio',
+      command: process.execPath,
+      args: [server],
+      file: path.join(dir, '.mcp.json'),
+      enabled: true
+    };
+    const inventory = inventoryWith({ mcpServers: [entry] });
+
+    const probed = await buildContextReport(inventory, { probe: true, probeTimeoutMs: 15_000 });
+    const line = probed.lines.find((item) => item.id === entry.id);
+    assert.equal(line?.measured, true, 'a server that answered must not be reported as an estimate');
+    assert.equal(line?.detail, '2 tools');
+    assert.ok((line?.tokens ?? 0) > 0);
+    assert.equal(probed.probed, true);
+    assert.deepEqual(probed.notes, []);
+
+    // The measured cost must actually come from the tools, not the fallback.
+    const estimated = await buildContextReport(inventory, {});
+    const estimatedLine = estimated.lines.find((item) => item.id === entry.id);
+    assert.equal(estimatedLine?.measured, false);
+    assert.notEqual(line?.tokens, estimatedLine?.tokens);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a server that cannot start is reported unmeasured rather than free', async () => {
+  const entry: McpEntry = {
+    id: 'claude:project:broken',
+    client: 'claude',
+    scope: 'project',
+    name: 'broken',
+    transport: 'stdio',
+    command: 'this-command-does-not-exist-anywhere',
+    args: [],
+    file: '/repo/.mcp.json',
+    enabled: true
+  };
+  const report = await buildContextReport(inventoryWith({ mcpServers: [entry] }), {
+    probe: true,
+    probeTimeoutMs: 10_000
+  });
+  const line = report.lines.find((item) => item.id === entry.id);
+  assert.equal(line?.measured, false);
+  assert.ok((line?.tokens ?? 0) > 0, 'an unmeasurable server is not free');
+  assert.ok(line?.detail && line.detail !== '0 tools');
 });

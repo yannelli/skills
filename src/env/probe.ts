@@ -14,6 +14,12 @@ import type { McpEntry } from './types.js';
  */
 
 export type ProbeResult = {
+  /**
+   * The McpEntry id. Two clients routinely configure a server of the same
+   * name, so callers must correlate on this rather than on `server`.
+   */
+  id: string;
+  /** The server's own name, for display. */
   server: string;
   ok: boolean;
   error?: string;
@@ -71,6 +77,7 @@ export async function probeMcpServer(entry: McpEntry, opts: ProbeOptions = {}): 
   );
   const totalTokens = outcome.tools.reduce((sum, tool) => sum + tool.tokens, 0);
   return {
+    id: entry.id,
     server: entry.name,
     ok: outcome.ok,
     durationMs: Date.now() - started,
@@ -103,6 +110,7 @@ export async function probeAll(
         // A hole in the input must not end the worker: the entries after it
         // still deserve a probe, and every slot still owes a result.
         results[index] = {
+          id: `entry ${index}`,
           server: `entry ${index}`,
           ok: false,
           error: 'missing entry',
@@ -115,6 +123,7 @@ export async function probeAll(
       results[index] = await probeMcpServer(entry, {
         ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {})
       }).catch((error: unknown) => ({
+        id: entry.id,
         server: entry.name,
         ok: false,
         error: messageOf(error),

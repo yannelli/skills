@@ -99,7 +99,7 @@ export function App() {
 
       <main className="min-w-0 flex-1 p-4 sm:p-6">
         <Tabs defaultValue="context" className="min-w-0 gap-4">
-          <div className="min-w-0 overflow-x-auto">
+          <div className="w-fit max-w-full overflow-x-auto pb-1.5">
             <TabsList>
               <TabsTrigger value="context">
                 Context

@@ -186,7 +186,7 @@ export function InventoryTab({ resource, onChanged }: InventoryTabProps) {
                   <TableHead>Source file</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead>Decided by</TableHead>
-                  <TableHead className="text-right">Control</TableHead>
+                  <TableHead className="sticky right-0 bg-card text-right">Control</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -217,11 +217,11 @@ export function InventoryTab({ resource, onChanged }: InventoryTabProps) {
                           </span>
                         ) : null}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="max-w-[16rem] truncate">
                         {row.file ? <FilePath file={row.file} /> : <Dash />}
                       </TableCell>
                       <TableCell>{row.state}</TableCell>
-                      <TableCell>
+                      <TableCell className="max-w-[14rem] truncate">
                         {row.stateSource ? (
                           <FilePath file={row.stateSource} />
                         ) : (
@@ -233,7 +233,9 @@ export function InventoryTab({ resource, onChanged }: InventoryTabProps) {
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
+                      {/* The control is the point of the table, so it stays
+                          reachable however far the row is scrolled. */}
+                      <TableCell className="sticky right-0 bg-card text-right">
                         <RowControl row={row} action={action} />
                       </TableCell>
                     </TableRow>

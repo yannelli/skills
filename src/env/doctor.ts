@@ -217,7 +217,7 @@ async function checkMcpReachable(inventory: Inventory, options: DoctorOptions): 
   return results
     .filter((result) => !result.ok)
     .map((result) => {
-      const server = enabled.find((item) => item.id === result.server);
+      const server = enabled.find((item) => item.id === result.id);
       return {
         severity: 'error' as const,
         client: server?.client ?? 'claude',

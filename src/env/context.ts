@@ -111,7 +111,7 @@ export async function buildContextReport(
   }
 
   for (const server of enabledServers) {
-    const probe = probes.find((result) => result.server === server.id);
+    const probe = probes.find((result) => result.id === server.id);
     if (probe?.ok) {
       lines.push({
         id: server.id,

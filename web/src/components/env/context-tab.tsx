@@ -32,12 +32,17 @@ import { formatTokens, percent } from '@/lib/format'
 import { useAction } from '@/lib/use-action'
 import type { Resource } from '@/lib/use-resource'
 
+/**
+ * Shades of the foreground rather than the chart palette: the chart tokens are
+ * a fixed greyscale ramp, so one end of it disappears in dark mode and the
+ * other disappears in light. Opacity over `foreground` flips with the theme.
+ */
 const KIND_BAR: Record<ContextKind, string> = {
-  skill: 'bg-chart-1',
-  mcp: 'bg-chart-2',
-  agent: 'bg-chart-3',
-  command: 'bg-chart-4',
-  memory: 'bg-chart-5',
+  skill: 'bg-foreground/85',
+  mcp: 'bg-foreground/65',
+  agent: 'bg-foreground/50',
+  command: 'bg-foreground/35',
+  memory: 'bg-foreground/20',
 }
 
 type ContextTabProps = {
@@ -134,11 +139,15 @@ export function ContextTab({ resource, probe, onMeasure, onChanged }: ContextTab
             </p>
           ) : null}
 
-          {report.notes.map((note) => (
-            <p key={note} className="text-xs text-muted-foreground">
-              {note}
-            </p>
-          ))}
+          {/* The layer's own notes tell a CLI user to re-run with --probe; here
+              that is a button, and the paragraph above already says it. */}
+          {report.notes
+            .filter((note) => !note.includes('--probe'))
+            .map((note) => (
+              <p key={note} className="text-xs text-muted-foreground">
+                {note}
+              </p>
+            ))}
         </CardContent>
       </Card>
 
@@ -203,7 +212,7 @@ export function ContextTab({ resource, probe, onMeasure, onChanged }: ContextTab
                       <TableCell className="w-full">
                         <span className="block h-2.5 rounded-full bg-muted">
                           <span
-                            className="block h-2.5 rounded-full bg-chart-2"
+                            className="block h-2.5 rounded-full bg-foreground/65"
                             style={{ width: `${percent(tokens, report.total)}%` }}
                           />
                         </span>
