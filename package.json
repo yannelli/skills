@@ -6,7 +6,8 @@
   "description": "Cross-client agent marketplace with an installable Yard MCP for just-in-time skill hydration.",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "bun": ">=1.2"
   },
   "bin": {
     "yard": "plugins/yard/dist/cli.js"
@@ -16,13 +17,13 @@
     "yard": "tsx src/cli.ts",
     "adapt": "tsx src/cli.ts --adapt",
     "sync-mcp": "tsx src/cli.ts --emit-mcp",
-    "build": "npm run build:server && npm run build:web",
+    "build": "bun run build:server && bun run build:web",
     "build:server": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=plugins/yard/dist/cli.js --legal-comments=none --banner:js=\"#!/usr/bin/env node\"",
-    "build:web": "npm --prefix web run build",
-    "dev:web": "npm --prefix web run dev",
+    "build:web": "bun run --cwd web build",
+    "dev:web": "bun run --cwd web dev",
     "validate": "node scripts/validate.mjs",
     "test": "tsx --test \"src/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit && npm --prefix web run typecheck"
+    "typecheck": "tsc --noEmit && bun run --cwd web typecheck"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.17",

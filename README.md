@@ -46,8 +46,15 @@ $ yard context
 
 ```bash
 git clone https://github.com/yannelli/skills && cd skills
-npm install && npm run build
-npm link            # puts `yard` on your PATH
+bun install && bun install --cwd web
+bun run build
+bun link            # puts `yard` on your PATH
+```
+
+No bun? npm works too — the web UI ships prebuilt, so only the server bundle needs building:
+
+```bash
+npm install && npm run build:server && npm link
 ```
 
 Or install the marketplace so the agent can drive it through MCP:
@@ -166,12 +173,17 @@ is labelled as an estimate everywhere it appears.
 ## Development
 
 ```bash
-npm install
-npm start          # http://127.0.0.1:4372
-npm test
-npm run validate
-npm run typecheck
-npm run build
+bun install && bun install --cwd web
+bun start          # http://127.0.0.1:4372
+bun run test       # node:test on node via tsx — use `bun run test`, not `bun test`
+bun run validate
+bun run typecheck
+bun run build
 ```
+
+npm still works: `npm install && npm --prefix web install`, then `npm start`, `npm test`, and
+`npm run validate` as before. `build` and `typecheck` hop into `web/` through bun; without bun,
+run the halves directly — `npm run build:server`, `npm --prefix web run build`, `npx tsc --noEmit`,
+`npm --prefix web run typecheck`.
 
 MIT.
