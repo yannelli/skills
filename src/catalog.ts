@@ -1,7 +1,9 @@
+import { existsSync } from 'node:fs';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
-import { CLAUDE_MARKETPLACE, PLUGINS_DIR, REPO_ROOT } from './paths.js';
+import { parsePluginMcp } from './mcp-spec.js';
+import { CLAUDE_MARKETPLACE, PLUGINS_DIR, REPO_ROOT, SERVER_DIR } from './paths.js';
 import {
   artifactId,
   type ArtifactKind,
@@ -39,22 +41,30 @@ export class Catalog {
       return this.snapshot;
     }
     const marketplacePath = path.join(this.root, path.relative(REPO_ROOT, CLAUDE_MARKETPLACE));
-    const marketplace = JSON.parse(await readFile(marketplacePath, 'utf8')) as MarketplaceFile;
     const plugins: PluginRecord[] = [];
     const artifacts: ArtifactRecord[] = [];
 
-    for (const entry of marketplace.plugins) {
-      const source = pluginSource(entry);
-      const pluginRoot = path.resolve(this.root, source);
-      const plugin: PluginRecord = {
-        name: entry.name,
-        description: entry.description ?? '',
-        version: entry.version ?? '0.0.0',
-        source,
-        root: pluginRoot
-      };
-      plugins.push(plugin);
-      artifacts.push(...(await scanPlugin(plugin)));
+    if (await exists(marketplacePath)) {
+      const marketplace = JSON.parse(await readFile(marketplacePath, 'utf8')) as MarketplaceFile;
+      for (const entry of marketplace.plugins) {
+        const source = pluginSource(entry);
+        const pluginRoot = path.resolve(this.root, source);
+        const plugin: PluginRecord = {
+          name: entry.name,
+          description: entry.description ?? '',
+          version: entry.version ?? '0.0.0',
+          source,
+          root: pluginRoot
+        };
+        plugins.push(plugin);
+        artifacts.push(...(await scanPlugin(plugin)));
+      }
+    } else {
+      const self = selfPlugin();
+      if (self) {
+        plugins.push(self);
+        artifacts.push(...(await scanPlugin(self)));
+      }
     }
 
     this.snapshot = { plugins, artifacts };
@@ -97,6 +107,7 @@ async function scanPlugin(plugin: PluginRecord): Promise<ArtifactRecord[]> {
   found.push(...(await scanMarkdownKind(plugin, 'agent', 'agents', ['.md', '.mdc', '.markdown'])));
   found.push(...(await scanMarkdownKind(plugin, 'command', 'commands', ['.md', '.mdc', '.markdown', '.txt'])));
   found.push(...(await scanHooks(plugin)));
+  found.push(...(await scanMcp(plugin)));
   return found;
 }
 
@@ -171,6 +182,40 @@ async function scanHooks(plugin: PluginRecord): Promise<ArtifactRecord[]> {
     });
   }
   return records;
+}
+
+async function scanMcp(plugin: PluginRecord): Promise<ArtifactRecord[]> {
+  const specs = await parsePluginMcp(plugin.name, plugin.root);
+  return specs.map((spec) => {
+    const raw = JSON.stringify(spec, null, 2);
+    return {
+      id: artifactId(plugin.name, 'mcp', spec.key),
+      plugin: plugin.name,
+      kind: 'mcp' as const,
+      name: spec.key,
+      description:
+        spec.transport.type === 'stdio'
+          ? `${plugin.name} MCP ${spec.key} (${spec.transport.command})`
+          : `${plugin.name} MCP ${spec.key} (${spec.transport.url})`,
+      path: path.join(plugin.root, '.mcp.json'),
+      version: plugin.version,
+      body: raw,
+      raw
+    };
+  });
+}
+
+function selfPlugin(): PluginRecord | undefined {
+  if (!existsSync(path.join(SERVER_DIR, '.claude-plugin', 'plugin.json'))) {
+    return undefined;
+  }
+  return {
+    name: 'yard',
+    description: 'Yard control plane',
+    version: '0.1.0',
+    source: SERVER_DIR,
+    root: SERVER_DIR
+  };
 }
 
 async function readMarkdownArtifact(

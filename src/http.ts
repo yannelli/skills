@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { localhostHostValidation, localhostOriginValidation } from '@modelcontextprotocol/hono';
 import { createMcpHandler } from '@modelcontextprotocol/server';
@@ -10,6 +10,18 @@ import { createPlugin } from './scaffold.js';
 import { searchArtifacts } from './search.js';
 import type { Session } from './session.js';
 import { ARTIFACT_KINDS, type ArtifactKind } from './types.js';
+
+const MIME: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.txt': 'text/plain; charset=utf-8',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2'
+};
 
 export function createYardApp(catalog: Catalog, session: Session) {
   const mcp = createMcpHandler(() => createYardServer(catalog, session));
@@ -115,6 +127,14 @@ export function createYardApp(catalog: Catalog, session: Session) {
     return c.json(await session.setHooksActive(body.ids, body.active));
   });
 
+  app.post('/api/session/mcp', async (c) => {
+    const body = await c.req.json<{ ids?: string[]; active?: boolean }>();
+    if (!body.ids?.length || typeof body.active !== 'boolean') {
+      return c.json({ error: 'ids and active are required' }, 400);
+    }
+    return c.json(await session.setMcpLive(body.ids, body.active));
+  });
+
   app.post('/api/plugins/:name/enabled', async (c) => {
     const body = await c.req.json<{ enabled?: boolean }>();
     if (typeof body.enabled !== 'boolean') {
@@ -141,17 +161,13 @@ export function createYardApp(catalog: Catalog, session: Session) {
 
   app.all('/mcp', (c) => mcp.fetch(c.req.raw));
 
-  app.get('/', async (c) => {
-    const html = await readFile(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
-    return c.html(html);
-  });
-  app.get('/styles.css', async (c) => {
-    const css = await readFile(path.join(PUBLIC_DIR, 'styles.css'), 'utf8');
-    return c.body(css, 200, { 'Content-Type': 'text/css; charset=utf-8' });
-  });
-  app.get('/app.js', async (c) => {
-    const js = await readFile(path.join(PUBLIC_DIR, 'app.js'), 'utf8');
-    return c.body(js, 200, { 'Content-Type': 'text/javascript; charset=utf-8' });
+  app.get('*', async (c) => {
+    const file = await resolvePublicFile(c.req.path);
+    if (!file) {
+      return c.json({ error: 'not found' }, 404);
+    }
+    const data = await readFile(file);
+    return c.body(data, 200, { 'Content-Type': mimeFor(file) });
   });
 
   app.onError((error, c) => c.json({ error: error.message }, 400));
@@ -166,4 +182,32 @@ function isKind(value: string): value is ArtifactKind {
 async function readIds(c: { req: { json: () => Promise<{ ids?: string[] }> } }): Promise<string[] | undefined> {
   const body = await c.req.json();
   return body.ids?.length ? body.ids : undefined;
+}
+
+async function resolvePublicFile(urlPath: string): Promise<string | undefined> {
+  const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
+  const candidate = path.resolve(PUBLIC_DIR, rel);
+  const root = path.resolve(PUBLIC_DIR);
+  if (candidate !== root && !candidate.startsWith(root + path.sep)) {
+    return undefined;
+  }
+  if (await isFile(candidate)) {
+    return candidate;
+  }
+  if (!path.extname(rel) && (await isFile(path.join(PUBLIC_DIR, 'index.html')))) {
+    return path.join(PUBLIC_DIR, 'index.html');
+  }
+  return undefined;
+}
+
+async function isFile(target: string): Promise<boolean> {
+  try {
+    return (await stat(target)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function mimeFor(file: string): string {
+  return MIME[path.extname(file)] ?? 'application/octet-stream';
 }

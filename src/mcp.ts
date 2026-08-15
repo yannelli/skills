@@ -19,7 +19,7 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
     {
       title: 'Search catalog',
       description:
-        'Search marketplace skills, rules, agents, commands, and hooks. Returns metadata only. In dynamic mode, hydrate an id to load its body and activate that plugin’s hooks.',
+        'Search marketplace skills, rules, agents, commands, hooks, and MCP servers. Returns metadata only. In dynamic mode, hydrate an id to load its body and activate that plugin’s hooks and MCP.',
       inputSchema: z.object({
         query: z.string().describe('Free-text query. Empty lists the catalog.'),
         kinds: z.array(KindSchema).optional(),
@@ -69,7 +69,7 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
     'session_status',
     {
       title: 'Session status',
-      description: 'Dynamic mode, pins, hydrated artifacts, active hooks, and the currently available id set.',
+      description: 'Dynamic mode, pins, hydrated artifacts, active hooks, live MCP, and the currently available id set.',
       annotations: { readOnlyHint: true, idempotentHint: true }
     },
     async () => textResult(await session.view())
@@ -80,7 +80,7 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
     {
       title: 'Set dynamic mode',
       description:
-        'When enabled, no skill bodies are in context until they are pinned or hydrated. Search still works. Hydrate returns content and activates that plugin’s hooks.',
+        'When enabled, no skill bodies are in context until they are pinned or hydrated. Search still works. Hydrate returns content and activates that plugin’s hooks and MCP.',
       inputSchema: z.object({
         enabled: z.boolean()
       })
@@ -93,7 +93,7 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
     {
       title: 'Hydrate artifacts',
       description:
-        'Load artifact bodies into the session and activate that plugin’s hooks. Use after catalog_search in dynamic mode.',
+        'Load artifact bodies into the session and activate that plugin’s hooks and MCP. Use after catalog_search in dynamic mode.',
       inputSchema: z.object({
         ids: z.array(z.string()).min(1)
       })
@@ -109,7 +109,8 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
     'session_dehydrate',
     {
       title: 'Dehydrate artifacts',
-      description: 'Drop hydrated artifacts from the session. Hooks deactivate when the plugin has nothing left loaded.',
+      description:
+        'Drop hydrated artifacts from the session. Hooks and MCP deactivate when the plugin has nothing left loaded.',
       inputSchema: z.object({
         ids: z.array(z.string()).min(1)
       })
@@ -138,6 +139,19 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
       })
     },
     async ({ ids }) => textResult(await session.unpin(ids))
+  );
+
+  server.registerTool(
+    'session_set_mcp',
+    {
+      title: 'Set MCP live',
+      description: 'Mark plugin MCP servers live or idle in this Yard session. Does not write client MCP stores.',
+      inputSchema: z.object({
+        ids: z.array(z.string()).min(1),
+        active: z.boolean()
+      })
+    },
+    async ({ ids, active }) => textResult(await session.setMcpLive(ids, active))
   );
 
   server.registerTool(

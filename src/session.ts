@@ -19,6 +19,7 @@ export class Session {
         pinned: unique(raw.pinned ?? []),
         hydrated: unique(raw.hydrated ?? []),
         hooksActive: unique(raw.hooksActive ?? []),
+        mcpLive: unique(raw.mcpLive ?? []),
         disabledPlugins: unique(raw.disabledPlugins ?? [])
       };
     } catch {
@@ -66,8 +67,10 @@ export class Session {
     await this.assertKnown(ids);
     const state = await this.read();
     state.hydrated = unique([...state.hydrated, ...ids]);
-    const hookIds = await this.hooksForArtifacts(ids);
+    const hookIds = await this.kindForArtifacts(ids, 'hook');
+    const mcpIds = await this.kindForArtifacts(ids, 'mcp');
     state.hooksActive = unique([...state.hooksActive, ...hookIds]);
+    state.mcpLive = unique([...state.mcpLive, ...mcpIds]);
     await this.write(state);
     return this.view();
   }
@@ -77,14 +80,8 @@ export class Session {
     const state = await this.read();
     state.hydrated = state.hydrated.filter((id) => !drop.has(id));
     const remaining = new Set([...state.hydrated, ...state.pinned]);
-    const staleHooks = await this.hooksForArtifacts(ids);
-    state.hooksActive = state.hooksActive.filter((hookId) => {
-      if (!staleHooks.includes(hookId)) {
-        return true;
-      }
-      const plugin = hookId.split('/')[0];
-      return [...remaining].some((id) => id.startsWith(`${plugin}/`));
-    });
+    state.hooksActive = await this.retainLive(state.hooksActive, ids, remaining, 'hook');
+    state.mcpLive = await this.retainLive(state.mcpLive, ids, remaining, 'mcp');
     await this.write(state);
     return this.view();
   }
@@ -104,16 +101,11 @@ export class Session {
   }
 
   async setHooksActive(ids: string[], active: boolean): Promise<SessionView> {
-    await this.assertKnown(ids);
-    const state = await this.read();
-    if (active) {
-      state.hooksActive = unique([...state.hooksActive, ...ids]);
-    } else {
-      const drop = new Set(ids);
-      state.hooksActive = state.hooksActive.filter((id) => !drop.has(id));
-    }
-    await this.write(state);
-    return this.view();
+    return this.setLiveField('hooksActive', ids, active);
+  }
+
+  async setMcpLive(ids: string[], active: boolean): Promise<SessionView> {
+    return this.setLiveField('mcpLive', ids, active);
   }
 
   private async availableIds(state: SessionState): Promise<string[]> {
@@ -126,12 +118,43 @@ export class Session {
     return enabled.filter((item) => open.has(item.id)).map((item) => item.id);
   }
 
-  private async hooksForArtifacts(ids: string[]): Promise<string[]> {
+  private async setLiveField(
+    field: 'hooksActive' | 'mcpLive',
+    ids: string[],
+    active: boolean
+  ): Promise<SessionView> {
+    await this.assertKnown(ids);
+    const state = await this.read();
+    if (active) {
+      state[field] = unique([...state[field], ...ids]);
+    } else {
+      const drop = new Set(ids);
+      state[field] = state[field].filter((id) => !drop.has(id));
+    }
+    await this.write(state);
+    return this.view();
+  }
+
+  private async retainLive(
+    current: string[],
+    droppedIds: string[],
+    remaining: Set<string>,
+    kind: 'hook' | 'mcp'
+  ): Promise<string[]> {
+    const stale = await this.kindForArtifacts(droppedIds, kind);
+    return current.filter((liveId) => {
+      if (!stale.includes(liveId)) {
+        return true;
+      }
+      const plugin = liveId.split('/')[0];
+      return [...remaining].some((id) => id.startsWith(`${plugin}/`));
+    });
+  }
+
+  private async kindForArtifacts(ids: string[], kind: 'hook' | 'mcp'): Promise<string[]> {
     const { artifacts } = await this.catalog.load();
     const plugins = new Set(ids.map((id) => id.split('/')[0]).filter((name): name is string => Boolean(name)));
-    return artifacts
-      .filter((item) => item.kind === 'hook' && plugins.has(item.plugin))
-      .map((item) => item.id);
+    return artifacts.filter((item) => item.kind === kind && plugins.has(item.plugin)).map((item) => item.id);
   }
 
   private async assertKnown(ids: string[]): Promise<void> {

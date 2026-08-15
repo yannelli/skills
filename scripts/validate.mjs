@@ -36,6 +36,16 @@ async function exists(target) {
   }
 }
 
+function mcpKeys(raw) {
+  const wrapped = raw?.mcpServers;
+  if (wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)) {
+    return Object.keys(wrapped).sort();
+  }
+  return Object.keys(raw ?? {})
+    .filter((key) => key !== '$schema')
+    .sort();
+}
+
 function parseFrontmatter(raw) {
   const match = FENCE.exec(raw);
   if (!match) {
@@ -143,6 +153,41 @@ for (const entry of loaded[0]?.plugins ?? []) {
       JSON.parse(await readFile(file, 'utf8'));
     }
   }
+
+  const claudeMcp = path.join(pluginRoot, '.mcp.json');
+  const agentMcp = path.join(pluginRoot, 'mcp.json');
+  const hasClaudeMcp = await exists(claudeMcp);
+  const hasAgentMcp = await exists(agentMcp);
+  if (hasClaudeMcp !== hasAgentMcp) {
+    fail(`${entry.name} must ship both .mcp.json and mcp.json`);
+  }
+  if (hasClaudeMcp && hasAgentMcp) {
+    const claude = JSON.parse(await readFile(claudeMcp, 'utf8'));
+    const agent = JSON.parse(await readFile(agentMcp, 'utf8'));
+    const claudeKeys = mcpKeys(claude);
+    const agentKeys = mcpKeys(agent);
+    if (JSON.stringify(claudeKeys) !== JSON.stringify(agentKeys)) {
+      fail(`${entry.name} MCP server keys diverge: ${claudeKeys.join(',')} vs ${agentKeys.join(',')}`);
+    }
+    if (agent.$schema !== 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json') {
+      fail(`${entry.name} mcp.json missing Agent Plugins $schema`);
+    }
+    for (const key of agentKeys) {
+      const server = agent.mcpServers?.[key];
+      if (!server?.type) {
+        fail(`${entry.name} mcp.json ${key} needs an explicit type`);
+      }
+    }
+  }
+}
+
+const yardDist = path.join(root, 'plugins', 'yard', 'dist', 'cli.js');
+const yardUi = path.join(root, 'plugins', 'yard', 'public', 'index.html');
+if (!(await exists(yardDist))) {
+  fail('plugins/yard/dist/cli.js missing. Run npm run build:server');
+}
+if (!(await exists(yardUi))) {
+  fail('plugins/yard/public/index.html missing. Run npm run build:web');
 }
 
 if (errors.length) {

@@ -38,6 +38,16 @@ test('hydrating hello activates that plugin’s hooks', async () => {
   });
 });
 
+test('hydrating yard activates that plugin’s MCP', async () => {
+  await withSession(async (session) => {
+    await session.setDynamicMode(true);
+    const view = await session.hydrate(['yard/skill/yard-control-plane']);
+    assert.ok(view.mcpLive.includes('yard/mcp/yard'));
+    const after = await session.dehydrate(['yard/skill/yard-control-plane']);
+    assert.equal(after.mcpLive.length, 0);
+  });
+});
+
 test('pins stay available in dynamic mode', async () => {
   await withSession(async (session) => {
     await session.pin(['hello/skill/hello']);

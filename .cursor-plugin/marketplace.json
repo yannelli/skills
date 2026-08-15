@@ -25,6 +25,14 @@
       "version": "0.1.0",
       "category": "productivity",
       "tags": ["review", "scaffold"]
+    },
+    {
+      "name": "yard",
+      "source": "./plugins/yard",
+      "description": "Local control plane. Search, hydrate, and attach marketplace skills, hooks, and MCP over stdio.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["yard", "mcp", "catalog"]
     }
   ]
 }

@@ -1,4 +1,4 @@
-export const ARTIFACT_KINDS = ['skill', 'rule', 'agent', 'command', 'hook'] as const;
+export const ARTIFACT_KINDS = ['skill', 'rule', 'agent', 'command', 'hook', 'mcp'] as const;
 
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
@@ -30,11 +30,23 @@ export type SessionState = {
   pinned: string[];
   hydrated: string[];
   hooksActive: string[];
+  mcpLive: string[];
   disabledPlugins: string[];
 };
 
 export type SessionView = SessionState & {
   available: string[];
+};
+
+export type McpTransport =
+  | { type: 'stdio'; command: string; args: string[]; env?: Record<string, string>; cwd?: string }
+  | { type: 'http'; url: string };
+
+export type McpServerSpec = {
+  key: string;
+  plugin: string;
+  transport: McpTransport;
+  source: 'claude' | 'agent';
 };
 
 export function artifactId(plugin: string, kind: ArtifactKind, name: string): string {
@@ -68,6 +80,8 @@ export function kindDirectory(kind: ArtifactKind): string {
       return 'commands';
     case 'hook':
       return 'hooks';
+    case 'mcp':
+      return '';
     default: {
       const _exhaustive: never = kind;
       throw new Error(`unhandled kind: ${_exhaustive}`);
@@ -81,6 +95,7 @@ export function defaultSession(): SessionState {
     pinned: [],
     hydrated: [],
     hooksActive: [],
+    mcpLive: [],
     disabledPlugins: []
   };
 }
