@@ -75,16 +75,24 @@ function pluginSkill(plugin: string, name: string, description: string): SkillEn
   };
 }
 
-function mcp(name: string, enabled: boolean): McpEntry {
+function mcp(
+  name: string,
+  enabled: boolean,
+  opts: { client?: Client; scope?: Scope; plugin?: string } = {}
+): McpEntry {
+  const client = opts.client ?? 'claude';
+  const scope = opts.scope ?? 'user';
+  const qualified = opts.plugin ? `${opts.plugin}:${name}` : name;
   return {
-    id: `claude:user:${name}`,
-    client: 'claude',
-    scope: 'user',
+    id: `${client}:${scope}:${qualified}`,
+    client,
+    scope,
     name,
     transport: 'stdio',
     command: 'node',
     args: [`${name}.js`],
     file: `${PROJECT}/.mcp.json`,
+    ...(opts.plugin ? { plugin: opts.plugin } : {}),
     enabled
   };
 }
@@ -300,6 +308,76 @@ test('a plugin remedy names the lever the client actually has', async () => {
     report.lines.find((line) => line.client === 'cursor')?.remedy,
     'cursor plugin remove toolkit'
   );
+});
+
+test('a skill\'s remedyActionable follows skillActionBlocked, not just whether a remedy string exists', async () => {
+  const claudeSkill = skill({ name: 'review', description: DESCRIPTION, visibility: 'on' });
+  const claudePluginSkill = pluginSkill('toolkit', 'alpha', DESCRIPTION);
+  const cursorPluginSkill: SkillEntry = {
+    ...claudePluginSkill,
+    id: 'cursor:plugin:toolkit:beta',
+    client: 'cursor',
+    name: 'beta',
+    qualifiedName: 'toolkit:beta'
+  };
+
+  const report = await buildContextReport(
+    inventoryWith({ skills: [claudeSkill, claudePluginSkill, cursorPluginSkill] })
+  );
+  const line = (id: string) => report.lines.find((entry) => entry.id === id);
+
+  const standalone = line('claude:user:review');
+  assert.equal(standalone?.remedy, 'yard skill review user-invocable-only');
+  assert.equal(standalone?.remedyActionable, true);
+
+  // Both plugin skills print the plugin's own lever as their remedy, but
+  // neither is clickable: `setSkillVisibility`/`setSkillEnabled` refuse a
+  // plugin skill in every client, matching `skillActionBlocked`.
+  const claudePlugin = line('claude:plugin:toolkit:alpha');
+  assert.equal(claudePlugin?.remedy, 'yard plugin disable toolkit');
+  assert.equal(claudePlugin?.remedyActionable, undefined);
+
+  const cursorPlugin = line('cursor:plugin:toolkit:beta');
+  assert.equal(cursorPlugin?.remedy, 'cursor plugin remove toolkit');
+  assert.equal(cursorPlugin?.remedyActionable, undefined);
+});
+
+test('an MCP server\'s remedyActionable follows the same client/origin matrix as the action layer', async () => {
+  const claudeUser = mcp('github', true);
+  const claudePlugin = mcp('yard', true, { scope: 'plugin', plugin: 'yard-tools' });
+  const cursorUser = mcp('shadcn', true, { client: 'cursor' });
+  const cursorPlugin = mcp('shadcn', true, { client: 'cursor', scope: 'plugin', plugin: 'shadcn-ui' });
+  const codexUser = mcp('data', true, { client: 'codex' });
+  const codexPlugin = mcp('data', true, { client: 'codex', scope: 'plugin', plugin: 'data-analytics' });
+
+  const report = await buildContextReport(
+    inventoryWith({
+      clients: ['claude', 'cursor', 'codex'],
+      mcpServers: [claudeUser, claudePlugin, cursorUser, cursorPlugin, codexUser, codexPlugin]
+    })
+  );
+  const line = (id: string) => report.lines.find((entry) => entry.id === id);
+
+  assert.equal(line(claudeUser.id)?.remedy, 'yard mcp disable github');
+  assert.equal(line(claudeUser.id)?.remedyActionable, true);
+
+  // Claude Code can switch a plugin's own MCP server off independently of
+  // the plugin, through ~/.claude.json's disabledMcpServers.
+  assert.equal(line(claudePlugin.id)?.remedy, 'yard mcp disable yard');
+  assert.equal(line(claudePlugin.id)?.remedyActionable, true);
+
+  assert.equal(line(cursorUser.id)?.remedy, 'yard mcp disable shadcn');
+  assert.equal(line(cursorUser.id)?.remedyActionable, true);
+
+  // Cursor has no lever for a plugin's own server; the remedy names the
+  // plugin instead, and is never offered as a button.
+  assert.equal(line(cursorPlugin.id)?.remedy, 'cursor plugin remove shadcn-ui');
+  assert.equal(line(cursorPlugin.id)?.remedyActionable, undefined);
+
+  // Codex owns config.toml outright regardless of origin, so printing a
+  // remedy that only refuses is worse than printing nothing.
+  assert.equal(line(codexUser.id)?.remedy, undefined);
+  assert.equal(line(codexPlugin.id)?.remedy, undefined);
 });
 
 test('biggestLevers rolls a plugin’s skills up under the plugin', async () => {

@@ -1,6 +1,7 @@
+import { mcpActionBlocked, skillActionBlocked } from './actions.js';
 import { probeAll, type ProbeResult } from './probe.js';
 import { estimateTokens } from './tokens.js';
-import type { Client, Inventory } from './types.js';
+import type { Client, Inventory, McpEntry } from './types.js';
 
 /**
  * What a developer's agent setup costs them in context window, per turn.
@@ -24,6 +25,13 @@ export type ContextLine = {
   detail?: string;
   /** The command that turns this off. */
   remedy?: string;
+  /**
+   * True when `remedy` is a `yard` command the action layer will actually
+   * carry out — false for a remedy that only names the client's own lever
+   * (a plugin's own enable/disable), which Yard has no API for and a button
+   * here would only fail against.
+   */
+  remedyActionable?: boolean;
 };
 
 export type ContextReport = {
@@ -93,11 +101,16 @@ export async function buildContextReport(
         : {}),
       // A plugin skill can be overridden via its `<plugin>:<skill>` key, but
       // the natural switch — and the one that also drops the plugin's hooks
-      // and servers — is the plugin itself, so that is the remedy shown.
+      // and servers — is the plugin itself, so that is the remedy shown. It
+      // is deliberately not `remedyActionable`: Yard has no API for another
+      // client's plugin lifecycle, only `skillActionBlocked`'s refusal.
       ...(skill.scope === 'plugin' && skill.plugin
         ? { remedy: pluginRemedy(skill.client, skill.plugin) }
         : skill.client === 'claude'
-          ? { remedy: `yard skill ${skill.qualifiedName} user-invocable-only` }
+          ? {
+              remedy: `yard skill ${skill.qualifiedName} user-invocable-only`,
+              remedyActionable: skillActionBlocked(skill) === undefined
+            }
           : {})
     });
   }
@@ -113,10 +126,7 @@ export async function buildContextReport(
 
   for (const server of enabledServers) {
     const probe = probes.find((result) => result.id === server.id);
-    // Codex owns ~/.codex/config.toml, so `yard mcp disable` refuses there.
-    // Printing a command that is going to refuse is worse than printing nothing.
-    const remedy =
-      server.client === 'codex' ? {} : { remedy: `yard mcp disable ${server.name}` };
+    const remedy = mcpRemedy(server);
     if (probe?.ok) {
       lines.push({
         id: server.id,
@@ -225,6 +235,23 @@ function tokensFromBytes(bytes: number): number {
  */
 function pluginRemedy(client: Client, plugin: string): string {
   return client === 'claude' ? `yard plugin disable ${plugin}` : `${client} plugin remove ${plugin}`;
+}
+
+/**
+ * The command that turns an MCP server off, and whether Yard will actually
+ * carry it out — see {@link mcpActionBlocked} for the rule. Codex owns
+ * ~/.codex/config.toml outright regardless of scope, so nothing is worth
+ * printing there. Cursor has no lever for a plugin's own server, so that
+ * case falls back to the plugin's remedy, shown for information only.
+ */
+function mcpRemedy(server: McpEntry): { remedy?: string; remedyActionable?: boolean } {
+  if (server.client === 'codex') {
+    return {};
+  }
+  if (mcpActionBlocked(server)) {
+    return server.plugin ? { remedy: pluginRemedy(server.client, server.plugin) } : {};
+  }
+  return { remedy: `yard mcp disable ${server.name}`, remedyActionable: true };
 }
 
 /** The lines worth acting on first: expensive, and switchable off. */

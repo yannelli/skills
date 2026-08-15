@@ -360,7 +360,10 @@ function requiredBoolean(value: unknown, field: string): boolean {
 }
 
 function targetFrom(body: Record<string, unknown>): ActionTarget {
-  const { client, scope, dryRun } = body;
+  const { id, client, scope, dryRun } = body;
+  if (id !== undefined && (typeof id !== 'string' || !id.trim())) {
+    return badRequest('id must be a non-empty string');
+  }
   if (client !== undefined && (typeof client !== 'string' || !isClient(client))) {
     return badRequest(`client must be one of ${CLIENTS.join(', ')}`);
   }
@@ -371,6 +374,7 @@ function targetFrom(body: Record<string, unknown>): ActionTarget {
     return badRequest('dryRun must be a boolean');
   }
   return actionTarget({
+    ...(id !== undefined ? { id } : {}),
     ...(client !== undefined ? { client } : {}),
     ...(scope !== undefined ? { scope } : {}),
     ...(dryRun !== undefined ? { dryRun } : {})

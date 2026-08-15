@@ -1,7 +1,7 @@
 import * as claude from './claude.js';
 import * as cursor from './cursor.js';
 import { scanEnvironment } from './inventory.js';
-import type { Client, Inventory, Scope, SkillVisibility } from './types.js';
+import type { Client, Inventory, McpEntry, PluginEntry, Scope, SkillEntry, SkillVisibility } from './types.js';
 
 /**
  * One entry point for every change Yard makes, shared by the CLI, the HTTP API,
@@ -49,6 +49,60 @@ type Common = {
   inventory?: Inventory;
 };
 
+/**
+ * The client/origin action matrix, as a value rather than as scattered
+ * conditionals: given one inventory row, is there any native setting Yard
+ * can safely write, and if not, why not. `set*` below throw exactly these
+ * strings; {@link import('./context.js').buildContextReport} reuses the same
+ * predicates so a "turn this off" button is never offered where the write
+ * would be refused.
+ *
+ * A plugin skill has no per-skill switch in *any* client — Claude Code's own
+ * settings reference excludes plugin skills from `skillOverrides` by name,
+ * and Codex/Cursor have no comparable setting for one skill inside an
+ * installed plugin — so the only lever is the plugin's own enable/disable.
+ */
+export function skillActionBlocked(entry: Pick<SkillEntry, 'client' | 'scope' | 'plugin'>): string | undefined {
+  if (entry.scope === 'plugin') {
+    return `plugin skill — enable or disable the "${entry.plugin}" plugin instead of switching it alone`;
+  }
+  if (entry.client === 'cursor') {
+    return 'cursor has no skill visibility setting — move the directory by hand';
+  }
+  return undefined;
+}
+
+/** Only Claude Code stores plugin enablement in settings; Codex and Cursor treat install as enable. */
+export function pluginActionBlocked(entry: Pick<PluginEntry, 'client'>): string | undefined {
+  if (entry.client !== 'claude') {
+    return `only Claude Code stores plugin enablement in settings — use \`${entry.client} plugin add/remove\` instead`;
+  }
+  return undefined;
+}
+
+/**
+ * Codex owns `~/.codex/config.toml` outright, for every server regardless of
+ * origin. Cursor and Claude both have a general per-server switch, but a
+ * plugin's own server is one more step removed for Cursor — which has no
+ * lever at all for a plugin's contributed servers — while Claude Code's
+ * `disabledMcpServers` array in `~/.claude.json` covers plugin servers too.
+ */
+export function mcpActionBlocked(entry: Pick<McpEntry, 'client' | 'scope' | 'plugin'>): string | undefined {
+  if (entry.scope === 'plugin') {
+    if (entry.client === 'cursor') {
+      return `plugin-contributed MCP server — Cursor manages it through the "${entry.plugin}" plugin, not ~/.cursor/mcp.json`;
+    }
+    if (entry.client === 'codex') {
+      return `plugin-contributed MCP server, not a ~/.codex/config.toml entry — enable or disable the "${entry.plugin}" plugin instead`;
+    }
+    return undefined;
+  }
+  if (entry.client === 'codex') {
+    return 'codex owns config.toml — use `codex mcp add/remove` so its formatting survives';
+  }
+  return undefined;
+}
+
 export async function setSkillVisibility(
   opts: Common & { skill: string; visibility: SkillVisibility }
 ): Promise<ActionResult> {
@@ -67,11 +121,12 @@ export async function setSkillVisibility(
     return setSkillEnabled({ ...opts, id: entry.id, enabled, client, inventory });
   }
 
-  if (entry.scope === 'plugin') {
+  if (skillActionBlocked(entry)) {
     // Verified against Claude Code's own settings reference: skillOverrides
     // "does not apply to plugin skills, which are managed through /plugin".
     // Writing one anyway is exactly the false-success case this layer exists
-    // to prevent.
+    // to prevent. (Client is always 'claude' here, so the only reason
+    // `skillActionBlocked` can return non-undefined is `scope === 'plugin'`.)
     throw new Error(
       `"${entry.qualifiedName}" is a plugin skill; Claude Code does not apply skillOverrides to plugin skills — enable or disable the "${entry.plugin}" plugin instead`
     );
@@ -133,9 +188,10 @@ export async function setSkillEnabled(opts: Common & { skill: string; enabled: b
         : undefined;
 
   if (!move) {
-    throw new Error(
-      `Cursor has no enable/disable for skills. Move ${entry.qualifiedName} out of its skills directory by hand.`
-    );
+    // Only reachable when `client` is 'cursor': the ternary above already
+    // covers 'claude' and 'codex', so `skillActionBlocked` always has a
+    // reason by the time we get here.
+    throw new Error(`"${entry.qualifiedName}": ${skillActionBlocked(entry) ?? 'no enable/disable lever for this client'}`);
   }
 
   if (opts.dryRun !== true) {
@@ -163,7 +219,7 @@ export async function setPluginEnabled(opts: Common & { plugin: string; enabled:
   );
   const client = entry.client;
 
-  if (client !== 'claude') {
+  if (pluginActionBlocked(entry)) {
     throw new Error(
       `Only Claude Code stores plugin enablement in settings. Use \`${client} plugin ${
         opts.enabled ? 'add' : 'remove'
@@ -204,7 +260,7 @@ export async function setMcpEnabled(opts: Common & { server: string; enabled: bo
   const client = entry.client;
 
   if (client === 'cursor') {
-    if (entry.scope === 'plugin') {
+    if (mcpActionBlocked(entry)) {
       throw new Error(
         `"${entry.name}" is a plugin-contributed MCP server; Cursor manages plugin servers through the plugin itself, not ~/.cursor/mcp.json — ${
           opts.enabled ? 'enable' : 'disable'
@@ -235,6 +291,9 @@ export async function setMcpEnabled(opts: Common & { server: string; enabled: bo
   }
 
   if (client === 'codex') {
+    // Codex owns ~/.codex/config.toml outright, so `mcpActionBlocked` returns
+    // a reason for every codex entry regardless of scope — this always
+    // throws, just with a scope-specific message.
     if (entry.scope === 'plugin') {
       throw new Error(
         `"${entry.name}" is a plugin-contributed MCP server, not a ~/.codex/config.toml entry — \`codex mcp remove\` would report no such server. ${
