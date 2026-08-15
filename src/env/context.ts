@@ -91,9 +91,9 @@ export async function buildContextReport(
       ...(skill.description.length > maxDescChars
         ? { detail: `description truncated at ${maxDescChars} chars` }
         : {}),
-      // A plugin skill cannot be switched off individually — Claude Code's
-      // skillOverrides deliberately does not apply to them — so the lever is
-      // the plugin. Saying so is more useful than leaving the row blank.
+      // A plugin skill can be overridden via its `<plugin>:<skill>` key, but
+      // the natural switch — and the one that also drops the plugin's hooks
+      // and servers — is the plugin itself, so that is the remedy shown.
       ...(skill.scope === 'plugin' && skill.plugin
         ? { remedy: pluginRemedy(skill.client, skill.plugin) }
         : skill.client === 'claude'
@@ -112,6 +112,10 @@ export async function buildContextReport(
 
   for (const server of enabledServers) {
     const probe = probes.find((result) => result.id === server.id);
+    // Codex owns ~/.codex/config.toml, so `yard mcp disable` refuses there.
+    // Printing a command that is going to refuse is worse than printing nothing.
+    const remedy =
+      server.client === 'codex' ? {} : { remedy: `yard mcp disable ${server.name}` };
     if (probe?.ok) {
       lines.push({
         id: server.id,
@@ -121,7 +125,7 @@ export async function buildContextReport(
         tokens: probe.totalTokens,
         measured: true,
         detail: `${probe.tools.length} tools`,
-        remedy: `yard mcp disable ${server.name}`
+        ...remedy
       });
       continue;
     }
@@ -133,7 +137,7 @@ export async function buildContextReport(
       tokens: UNPROBED_MCP_TOKENS,
       measured: false,
       detail: probe?.error ?? (options.probe ? 'probe failed' : 'not probed — run with --probe for the real cost'),
-      remedy: `yard mcp disable ${server.name}`
+      ...remedy
     });
   }
 
