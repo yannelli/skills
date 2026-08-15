@@ -94,7 +94,7 @@ export async function runScan(args: Args): Promise<number> {
         { header: 'scope' },
         { header: 'name', max: 44 },
         { header: 'state' },
-        { header: 'source', max: 58 }
+        { header: 'source', max: 58, cut: 'start' }
       ],
       rows.map((row) => [
         row.kind,

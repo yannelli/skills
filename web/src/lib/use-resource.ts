@@ -40,7 +40,15 @@ export function useResource<T>(load: () => Promise<T>, fallbackError: string): R
       },
       (error: unknown) => {
         if (live) {
-          setSettled({ load, nonce, error: messageOf(error, fallbackError) });
+          // Carry the last good value forward. A failed refetch must leave the
+          // page it already drew standing, with the error beside it, rather
+          // than replacing a working table with an error card.
+          setSettled((previous) => ({
+            load,
+            nonce,
+            ...(previous?.data === undefined ? {} : { data: previous.data }),
+            error: messageOf(error, fallbackError)
+          }));
         }
       }
     );

@@ -193,7 +193,9 @@ export function InventoryTab({ resource, onChanged }: InventoryTabProps) {
                 {visible.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="text-muted-foreground">
-                      Nothing matches those filters.
+                      {rows.length === 0
+                        ? 'No skills, plugins, MCP servers, hooks, subagents, commands or memory files were found for Claude, Codex or Cursor.'
+                        : 'Nothing matches those filters.'}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -296,7 +298,7 @@ function RowControl({
           value={control.visibility}
           disabled={busy || Boolean(control.blocked)}
           onValueChange={(next) => {
-            action.run(row.key, () => setSkillVisibility(control.skill, next as SkillVisibility))
+            action.run(row.key, () => setSkillVisibility(control.skill, next as SkillVisibility, row.client))
           }}
         >
           <SelectTrigger className="w-44">
@@ -325,8 +327,8 @@ function RowControl({
         onCheckedChange={(next) => {
           action.run(row.key, () =>
             control.type === 'plugin'
-              ? setPluginEnabled(control.plugin, next)
-              : setMcpEnabled(control.server, next)
+              ? setPluginEnabled(control.plugin, next, row.client)
+              : setMcpEnabled(control.server, next, row.client)
           )
         }}
       />

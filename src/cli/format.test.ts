@@ -12,6 +12,7 @@ import {
   renderTable,
   shortenPath,
   truncate,
+  truncateStart,
   visibleWidth
 } from './format.js';
 
@@ -52,6 +53,24 @@ test('cells longer than the column maximum are truncated with an ellipsis', () =
     [['a description far too long for the column', 'E1']]
   );
   assert.deepEqual(table.split('\n'), ['summary   code', 'a descr…  E1']);
+});
+
+test('a path column is cut from the left, so the tail still names the file', () => {
+  assert.equal(truncateStart('abcdefghij', 5), '…ghij');
+  assert.equal(truncateStart('abc', 5), 'abc');
+  assert.equal(truncateStart('abc', 1), '…');
+  assert.equal(truncateStart('abc', 0), '');
+
+  // The failure this guards: two files under one long prefix, cut from the
+  // right, render identically and identify nothing.
+  const rows = [
+    ['~/.claude/plugins/cache/official/hookify/skills/writing-rules/SKILL.md'],
+    ['~/.claude/plugins/cache/official/hookify/skills/reading-rules/SKILL.md']
+  ];
+  const columns = [{ header: 'source', max: 24, cut: 'start' as const }];
+  const [, first, second] = renderTable(columns, rows).split('\n');
+  assert.equal(first, '…/writing-rules/SKILL.md');
+  assert.notEqual(first, second);
 });
 
 test('a styled cell keeps the same layout as an unstyled one', () => {

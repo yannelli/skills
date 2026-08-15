@@ -1695,11 +1695,22 @@ async function createPlugin(input) {
     throw new Error("description is required");
   }
   const dest = path4.join(PLUGINS_DIR, name);
-  await cp(TEMPLATE_DIR, dest, { recursive: true, errorOnExist: true });
+  if (await pathExists(dest)) {
+    throw new Error(`plugin "${name}" already exists at ${dest}`);
+  }
+  await cp(TEMPLATE_DIR, dest, { recursive: true, errorOnExist: true, force: false });
   await replaceInTree(dest, { PLUGIN_NAME: name, PLUGIN_DESCRIPTION: description });
   await rename(path4.join(dest, "skills", "PLUGIN_NAME"), path4.join(dest, "skills", name));
   await addCatalogEntries(name, description);
   return dest;
+}
+async function pathExists(target) {
+  try {
+    await stat(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 async function replaceInTree(root, vars) {
   const walk2 = async (dir) => {
@@ -2815,7 +2826,7 @@ async function buildContextReport(inventory, options = {}) {
       // A plugin skill cannot be switched off individually — Claude Code's
       // skillOverrides deliberately does not apply to them — so the lever is
       // the plugin. Saying so is more useful than leaving the row blank.
-      ...skill.scope === "plugin" && skill.plugin ? { remedy: `yard plugin disable ${skill.plugin}` } : skill.client === "claude" ? { remedy: `yard skill ${skill.qualifiedName} user-invocable-only` } : {}
+      ...skill.scope === "plugin" && skill.plugin ? { remedy: pluginRemedy(skill.client, skill.plugin) } : skill.client === "claude" ? { remedy: `yard skill ${skill.qualifiedName} user-invocable-only` } : {}
     });
   }
   const enabledServers = inventory.mcpServers.filter((server) => server.enabled);
@@ -2909,6 +2920,9 @@ async function buildContextReport(inventory, options = {}) {
 }
 function tokensFromBytes(bytes) {
   return Math.round(bytes / 4.1);
+}
+function pluginRemedy(client, plugin) {
+  return client === "claude" ? `yard plugin disable ${plugin}` : `${client} plugin remove ${plugin}`;
 }
 function topOffenders(report, limit = 10) {
   return report.lines.filter((line) => line.remedy).slice(0, limit);
@@ -4743,6 +4757,18 @@ function truncate(value, max) {
   }
   return `${value.slice(0, max - 1)}${ELLIPSIS}`;
 }
+function truncateStart(value, max) {
+  if (max <= 0) {
+    return "";
+  }
+  if (value.length <= max) {
+    return value;
+  }
+  if (max === 1) {
+    return ELLIPSIS;
+  }
+  return `${ELLIPSIS}${value.slice(value.length - (max - 1))}`;
+}
 function pad(value, width, align = "left") {
   const fill = " ".repeat(Math.max(0, width - visibleWidth(value)));
   return align === "right" ? `${fill}${value}` : `${value}${fill}`;
@@ -4754,7 +4780,10 @@ function renderTable(columns, rows, options = {}) {
   const cells = rows.map(
     (row) => columns.map((column, index) => {
       const raw2 = row[index] ?? "";
-      return column.max === void 0 ? raw2 : truncate(raw2, column.max);
+      if (column.max === void 0) {
+        return raw2;
+      }
+      return column.cut === "start" ? truncateStart(raw2, column.max) : truncate(raw2, column.max);
     })
   );
   const widths = columns.map((column, index) => {
@@ -4836,7 +4865,7 @@ async function runContext(args) {
   });
   const offenders = topOffenders(report, 10).map((line) => ({
     ...line,
-    ...line.remedy ? { remedy: qualify(line.remedy, line.client, report) } : {}
+    ...line.remedy ? { remedy: qualify(line.remedy, line.client, inventory) } : {}
   }));
   if (options.json) {
     console.log(renderJson({ ...report, offenders }));
@@ -4921,9 +4950,37 @@ function printLedger(report, offenders, style) {
   console.log("");
   console.log(next ? `next: ${next}` : "next: yard doctor");
 }
-function qualify(remedy, client, report) {
-  const sharing = new Set(report.lines.filter((line) => line.remedy === remedy).map((line) => line.client));
-  return sharing.size > 1 ? `${remedy} --client=${client}` : remedy;
+function qualify(remedy, client, inventory) {
+  const target = remedyTarget(remedy);
+  if (!target) {
+    return remedy;
+  }
+  const owners = new Set(target.owners(inventory));
+  return owners.size > 1 ? `${remedy} --client=${client}` : remedy;
+}
+function remedyTarget(remedy) {
+  const mcp = /^yard mcp (?:enable|disable) (.+)$/.exec(remedy);
+  if (mcp?.[1]) {
+    const name = mcp[1];
+    return {
+      owners: (inventory) => inventory.mcpServers.filter((server) => server.name === name).map((s) => s.client)
+    };
+  }
+  const plugin = /^yard plugin (?:enable|disable) (.+)$/.exec(remedy);
+  if (plugin?.[1]) {
+    const name = plugin[1];
+    return {
+      owners: (inventory) => inventory.plugins.filter((entry) => entry.name === name || entry.qualifiedName === name).map((entry) => entry.client)
+    };
+  }
+  const skill = /^yard skill (\S+) \S+$/.exec(remedy);
+  if (skill?.[1]) {
+    const name = skill[1];
+    return {
+      owners: (inventory) => inventory.skills.filter((entry) => entry.name === name || entry.qualifiedName === name).map((entry) => entry.client)
+    };
+  }
+  return void 0;
 }
 
 // src/env/doctor.ts
@@ -5062,7 +5119,9 @@ function checkPlugins(inventory) {
         code: "plugin-empty",
         summary: `${plugin.qualifiedName} is enabled but contributes nothing loadable`,
         ...plugin.root ? { file: plugin.root } : {},
-        remedy: `yard plugin disable ${plugin.qualifiedName}`
+        // `yard plugin disable` only works for Claude Code, which is the one
+        // client that keeps plugin enablement in a settings file.
+        remedy: plugin.client === "claude" ? `yard plugin disable ${plugin.qualifiedName}` : `${plugin.client} plugin remove ${plugin.qualifiedName}`
       });
     }
   }
@@ -5149,7 +5208,12 @@ async function runDoctor(args) {
       rows.push(["", "", "", style.dim(truncate(`fix: ${item.remedy}`, DETAIL_WIDTH))]);
     }
     if (item.file && !item.summary.includes(item.file)) {
-      rows.push(["", "", "", style.dim(truncate(shortenPath(item.file, inventory.projectRoot), DETAIL_WIDTH))]);
+      rows.push([
+        "",
+        "",
+        "",
+        style.dim(truncateStart(shortenPath(item.file, inventory.projectRoot), DETAIL_WIDTH))
+      ]);
     }
   }
   console.log(
@@ -5193,6 +5257,7 @@ async function runEmitMcp() {
 async function setSkillVisibility2(opts) {
   const client = await resolveClient(
     opts,
+    `skill "${opts.skill}"`,
     (inventory) => inventory.skills.filter((skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill)
   );
   if (client !== "claude") {
@@ -5217,6 +5282,7 @@ async function setSkillVisibility2(opts) {
 async function setSkillEnabled(opts) {
   const client = await resolveClient(
     opts,
+    `skill "${opts.skill}"`,
     (inventory) => inventory.skills.filter((skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill)
   );
   const move = client === "claude" ? await setSkillDirectoryEnabled({
@@ -5244,6 +5310,7 @@ async function setSkillEnabled(opts) {
 async function setPluginEnabled2(opts) {
   const client = await resolveClient(
     opts,
+    `plugin "${opts.plugin}"`,
     (inventory) => inventory.plugins.filter((plugin) => plugin.qualifiedName === opts.plugin || plugin.name === opts.plugin)
   );
   if (client !== "claude") {
@@ -5269,6 +5336,7 @@ async function setPluginEnabled2(opts) {
 async function setMcpEnabled2(opts) {
   const client = await resolveClient(
     opts,
+    `mcp server "${opts.server}"`,
     (inventory) => inventory.mcpServers.filter((server) => server.name === opts.server)
   );
   if (client === "cursor") {
@@ -5307,21 +5375,26 @@ async function setMcpEnabled2(opts) {
     detail: result.changed ? `${opts.server} ${opts.enabled ? "approved" : "rejected"} in ${result.file}` : `${opts.server} was already ${opts.enabled ? "enabled" : "disabled"}`
   };
 }
-async function resolveClient(opts, matches) {
-  if (opts.client) {
-    return opts.client;
-  }
+async function resolveClient(opts, subject, matches) {
   const inventory = opts.inventory ?? await scanEnvironment(opts.projectRoot);
   const found = matches(inventory);
   const clients = [...new Set(found.map((item) => item.client))];
+  if (opts.client) {
+    if (clients.includes(opts.client)) {
+      return opts.client;
+    }
+    throw new Error(
+      clients.length ? `${subject} not found in ${opts.client} \u2014 it is in ${clients.join(", ")}` : `${subject} not found in ${opts.client} \u2014 run \`yard scan\` to see what is there`
+    );
+  }
   if (clients.length === 1 && clients[0]) {
     return clients[0];
   }
   if (clients.length === 0) {
-    throw new Error("not found in any installed client \u2014 run `yard scan` to see what is there");
+    throw new Error(`${subject} not found in any installed client \u2014 run \`yard scan\` to see what is there`);
   }
   throw new Error(
-    `ambiguous across ${clients.join(", ")} \u2014 pass --client to choose (matched ${found.map((item) => item.id).join(", ")})`
+    `${subject} is ambiguous across ${clients.join(", ")} \u2014 set client to one of them (matched ${found.map((item) => item.id).join(", ")})`
   );
 }
 
@@ -5495,7 +5568,7 @@ async function runScan(args) {
         { header: "scope" },
         { header: "name", max: 44 },
         { header: "state" },
-        { header: "source", max: 58 }
+        { header: "source", max: 58, cut: "start" }
       ],
       rows.map((row) => [
         row.kind,
@@ -31045,7 +31118,10 @@ function tokenize(query) {
 
 // src/mcp.ts
 var KindSchema = _enum(ARTIFACT_KINDS);
-var EnvKindSchema = _enum(ENV_KINDS);
+var EnvKindSchema = preprocess(
+  (value) => typeof value === "string" ? toEnvKind(value) ?? value : value,
+  _enum(ENV_KINDS)
+);
 var ClientSchema = _enum(CLIENTS);
 var ScopeSchema = _enum(["user", "project", "local"]);
 var VisibilitySchema = _enum(SKILL_VISIBILITIES);
@@ -31256,12 +31332,13 @@ function createYardServer(catalog, session) {
       title: "Price the context window",
       description: "Estimated tokens every turn spends on skill listings, MCP tool schemas, subagents, commands, and memory files, with the biggest offenders and the command that turns each one off. Use it when the user asks why context is tight or what their setup costs. Nothing is written. With probe true it starts the user\u2019s configured MCP servers to read their real tool schemas, which runs those commands \u2014 leave it off unless the user asked for exact MCP numbers.",
       inputSchema: object({
+        client: ClientSchema.optional().describe("Price one client only. Defaults to every installed client."),
         probe: boolean2().optional().describe("Start each configured MCP server to measure it instead of estimating. Defaults to false.")
       }),
       annotations: { readOnlyHint: true }
     },
-    async ({ probe }) => {
-      const inventory = await scanEnvironment(process.cwd());
+    async ({ client, probe }) => {
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
       const report = await buildContextReport(inventory, { probe: probe === true });
       const lines = report.lines.slice(0, MAX_REPORT_LINES);
       return textResult({
@@ -31284,12 +31361,13 @@ function createYardServer(catalog, session) {
       title: "Diagnose the agent setup",
       description: "Find what is quietly broken: hooks pointing at deleted scripts, skills the model can never see, duplicate skill names, plugins that are enabled but not installed, unparseable config. Use it when a skill, hook, or MCP server does not behave as the user expects. Nothing is written. With probe true it starts the user\u2019s configured MCP servers to find out which ones actually come up, which runs those commands \u2014 leave it off unless the user asked.",
       inputSchema: object({
+        client: ClientSchema.optional().describe("Diagnose one client only. Defaults to every installed client."),
         probe: boolean2().optional().describe("Start each configured MCP server to check it responds. Defaults to false.")
       }),
       annotations: { readOnlyHint: true }
     },
-    async ({ probe }) => {
-      const inventory = await scanEnvironment(process.cwd());
+    async ({ client, probe }) => {
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
       const diagnoses = await diagnose(inventory, { probe: probe === true });
       const shown = diagnoses.slice(0, MAX_REPORT_LINES);
       return textResult({
@@ -31592,16 +31670,18 @@ function createYardApp(catalog, session) {
   app.get(
     "/api/env/context",
     envRoute(async (c) => {
+      const client = clientParam(c.req.query("client"));
       const probe = probeParam(c.req.query("probe"));
-      const inventory = await scanEnvironment(process.cwd());
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
       return buildContextReport(inventory, { probe });
     })
   );
   app.get(
     "/api/env/doctor",
     envRoute(async (c) => {
+      const client = clientParam(c.req.query("client"));
       const probe = probeParam(c.req.query("probe"));
-      const inventory = await scanEnvironment(process.cwd());
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
       return { diagnoses: await diagnose(inventory, { probe }) };
     })
   );
@@ -32103,10 +32183,25 @@ async function main() {
     return 0;
   }
   if (first.startsWith("-")) {
+    const unknown2 = argv.find((arg) => arg !== "--stdio" && !arg.startsWith("--port="));
+    if (unknown2 !== void 0) {
+      process.stderr.write(
+        unknown2 === "--port" ? "yard: --port needs a value, as --port=<port>\n" : `yard: unknown flag "${unknown2}"
+`
+      );
+      printUsage(process.stderr);
+      return 1;
+    }
     const portFlag = argv.find((arg) => arg.startsWith("--port="));
+    const port = portFlag === void 0 ? void 0 : Number(portFlag.slice("--port=".length));
+    if (port !== void 0 && !Number.isInteger(port)) {
+      process.stderr.write(`yard: --port must be a whole number, got "${portFlag?.slice("--port=".length)}"
+`);
+      return 1;
+    }
     return runServe({
       stdio: argv.includes("--stdio"),
-      ...portFlag ? { port: Number(portFlag.slice("--port=".length)) } : {}
+      ...port !== void 0 ? { port } : {}
     });
   }
   const command = COMMANDS[first];

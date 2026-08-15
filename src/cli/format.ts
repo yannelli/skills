@@ -18,8 +18,15 @@ export type Align = 'left' | 'right';
 export type Column = {
   header: string;
   align?: Align;
-  /** Cells wider than this are cut and end in an ellipsis. */
+  /** Cells wider than this are cut and marked with an ellipsis. */
   max?: number;
+  /**
+   * Which end to cut. 'start' keeps the tail, which is what a column of paths
+   * wants: forty rows all reading `~/.claude/plugins/cache/claude-plu…` name
+   * nothing, while `…official/hookify/skills/writing-rules/SKILL.md` names the
+   * file.
+   */
+  cut?: 'end' | 'start';
 };
 
 export type TableOptions = {
@@ -48,6 +55,20 @@ export function truncate(value: string, max: number): string {
   return `${value.slice(0, max - 1)}${ELLIPSIS}`;
 }
 
+/** Cut from the left, keeping the identifying tail. */
+export function truncateStart(value: string, max: number): string {
+  if (max <= 0) {
+    return '';
+  }
+  if (value.length <= max) {
+    return value;
+  }
+  if (max === 1) {
+    return ELLIPSIS;
+  }
+  return `${ELLIPSIS}${value.slice(value.length - (max - 1))}`;
+}
+
 export function pad(value: string, width: number, align: Align = 'left'): string {
   const fill = ' '.repeat(Math.max(0, width - visibleWidth(value)));
   return align === 'right' ? `${fill}${value}` : `${value}${fill}`;
@@ -65,7 +86,10 @@ export function renderTable(
   const cells = rows.map((row) =>
     columns.map((column, index) => {
       const raw = row[index] ?? '';
-      return column.max === undefined ? raw : truncate(raw, column.max);
+      if (column.max === undefined) {
+        return raw;
+      }
+      return column.cut === 'start' ? truncateStart(raw, column.max) : truncate(raw, column.max);
     })
   );
 

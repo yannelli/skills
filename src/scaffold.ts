@@ -26,11 +26,26 @@ export async function createPlugin(input: NewPlugin): Promise<string> {
   }
 
   const dest = path.join(PLUGINS_DIR, name);
-  await cp(TEMPLATE_DIR, dest, { recursive: true, errorOnExist: true });
+  // cp's errorOnExist only fires with force:false, so without this guard an
+  // existing plugin is half-overwritten and then fails on the skills rename
+  // with a bare ENOTEMPTY.
+  if (await pathExists(dest)) {
+    throw new Error(`plugin "${name}" already exists at ${dest}`);
+  }
+  await cp(TEMPLATE_DIR, dest, { recursive: true, errorOnExist: true, force: false });
   await replaceInTree(dest, { PLUGIN_NAME: name, PLUGIN_DESCRIPTION: description });
   await rename(path.join(dest, 'skills', 'PLUGIN_NAME'), path.join(dest, 'skills', name));
   await addCatalogEntries(name, description);
   return dest;
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await stat(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function replaceInTree(root: string, vars: Record<string, string>): Promise<void> {

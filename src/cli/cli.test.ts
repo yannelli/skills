@@ -162,6 +162,31 @@ test('a mutation writes the settings file it names', async () => {
   });
 });
 
+test('an unknown leading flag is an error, not a server on the default port', async () => {
+  await withFixture(async (_fixture, exec) => {
+    // The legacy surface is --stdio and --port=<port>. Anything else used to
+    // fall through to `serve`, so a typo bound port 4372 and hung.
+    const result = await exec(['--jsonn']);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /unknown flag "--jsonn"/);
+  });
+});
+
+test('--client narrows the search instead of skipping it', async () => {
+  await withFixture(async (fixture, exec) => {
+    const settings = path.join(fixture.home, '.claude', 'settings.json');
+    const before = await readFile(settings, 'utf8');
+
+    // Without the existence check this wrote skillOverrides for a skill that
+    // does not exist, and reported success.
+    const result = await exec(['skill', 'ghost', 'off', '--client=claude', `--project=${fixture.project}`]);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /skill "ghost" not found in claude/);
+    assert.equal(await readFile(settings, 'utf8'), before);
+  });
+});
+
 test('an unknown name fails with one line on stderr and exit 1', async () => {
   await withFixture(async (fixture, exec) => {
     const result = await exec(['mcp', 'disable', 'nope', `--project=${fixture.project}`]);

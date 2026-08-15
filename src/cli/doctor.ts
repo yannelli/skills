@@ -9,6 +9,7 @@ import {
   renderTable,
   shortenPath,
   truncate,
+  truncateStart,
   type Style
 } from './format.js';
 
@@ -52,7 +53,13 @@ export async function runDoctor(args: Args): Promise<number> {
     }
     // Several summaries name the file already; repeating it wastes a line.
     if (item.file && !item.summary.includes(item.file)) {
-      rows.push(['', '', '', style.dim(truncate(shortenPath(item.file, inventory.projectRoot), DETAIL_WIDTH))]);
+      // A path identifies itself by its tail, so this one is cut from the left.
+      rows.push([
+        '',
+        '',
+        '',
+        style.dim(truncateStart(shortenPath(item.file, inventory.projectRoot), DETAIL_WIDTH))
+      ]);
     }
   }
 

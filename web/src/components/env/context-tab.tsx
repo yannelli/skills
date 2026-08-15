@@ -380,10 +380,10 @@ function controlFor(line: ContextLine): { label: string; run: () => Promise<Acti
     return undefined
   }
   if (line.kind === 'skill') {
-    return { label: 'turn off', run: () => setSkillVisibility(line.label, 'off') }
+    return { label: 'turn off', run: () => setSkillVisibility(line.label, 'off', line.client) }
   }
   if (line.kind === 'mcp') {
-    return { label: 'disable', run: () => setMcpEnabled(line.label, false) }
+    return { label: 'disable', run: () => setMcpEnabled(line.label, false, line.client) }
   }
   return undefined
 }

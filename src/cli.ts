@@ -57,10 +57,28 @@ async function main(): Promise<number> {
   }
 
   if (first.startsWith('-')) {
+    // The legacy surface is exactly --stdio and --port=<port>. Anything else
+    // leading with a dash used to start an HTTP server, which meant a typo like
+    // `yard --jsonn` silently bound a port instead of saying what was wrong.
+    const unknown = argv.find((arg) => arg !== '--stdio' && !arg.startsWith('--port='));
+    if (unknown !== undefined) {
+      process.stderr.write(
+        unknown === '--port'
+          ? 'yard: --port needs a value, as --port=<port>\n'
+          : `yard: unknown flag "${unknown}"\n`
+      );
+      printUsage(process.stderr);
+      return 1;
+    }
     const portFlag = argv.find((arg) => arg.startsWith('--port='));
+    const port = portFlag === undefined ? undefined : Number(portFlag.slice('--port='.length));
+    if (port !== undefined && !Number.isInteger(port)) {
+      process.stderr.write(`yard: --port must be a whole number, got "${portFlag?.slice('--port='.length)}"\n`);
+      return 1;
+    }
     return runServe({
       stdio: argv.includes('--stdio'),
-      ...(portFlag ? { port: Number(portFlag.slice('--port='.length)) } : {})
+      ...(port !== undefined ? { port } : {})
     });
   }
 

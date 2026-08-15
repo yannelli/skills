@@ -279,23 +279,35 @@ export function fetchDoctor(probe: boolean): Promise<{ diagnoses: Diagnosis[] }>
   return api<{ diagnoses: Diagnosis[] }>(`/api/env/doctor${probe ? '?probe=1' : ''}`);
 }
 
-export function setSkillVisibility(skill: string, visibility: SkillVisibility): Promise<ActionResult> {
+/**
+ * Every action takes the client the row came from. Names are not unique across
+ * clients — the same plugin installed for Codex and Cursor gives two skills of
+ * the same name, and one MCP server is commonly configured in all three — and
+ * the API refuses a bare name it cannot resolve to one client rather than
+ * guessing which config to edit. The UI always knows which row was clicked, so
+ * it always says.
+ */
+export function setSkillVisibility(
+  skill: string,
+  visibility: SkillVisibility,
+  client?: Client
+): Promise<ActionResult> {
   return api<ActionResult>('/api/env/skill', {
     method: 'POST',
-    body: JSON.stringify({ skill, visibility })
+    body: JSON.stringify({ skill, visibility, ...(client ? { client } : {}) })
   });
 }
 
-export function setPluginEnabled(plugin: string, enabled: boolean): Promise<ActionResult> {
+export function setPluginEnabled(plugin: string, enabled: boolean, client?: Client): Promise<ActionResult> {
   return api<ActionResult>('/api/env/plugin', {
     method: 'POST',
-    body: JSON.stringify({ plugin, enabled })
+    body: JSON.stringify({ plugin, enabled, ...(client ? { client } : {}) })
   });
 }
 
-export function setMcpEnabled(server: string, enabled: boolean): Promise<ActionResult> {
+export function setMcpEnabled(server: string, enabled: boolean, client?: Client): Promise<ActionResult> {
   return api<ActionResult>('/api/env/mcp', {
     method: 'POST',
-    body: JSON.stringify({ server, enabled })
+    body: JSON.stringify({ server, enabled, ...(client ? { client } : {}) })
   });
 }

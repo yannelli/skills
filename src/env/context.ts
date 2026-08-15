@@ -95,7 +95,7 @@ export async function buildContextReport(
       // skillOverrides deliberately does not apply to them — so the lever is
       // the plugin. Saying so is more useful than leaving the row blank.
       ...(skill.scope === 'plugin' && skill.plugin
-        ? { remedy: `yard plugin disable ${skill.plugin}` }
+        ? { remedy: pluginRemedy(skill.client, skill.plugin) }
         : skill.client === 'claude'
           ? { remedy: `yard skill ${skill.qualifiedName} user-invocable-only` }
           : {})
@@ -207,6 +207,19 @@ export async function buildContextReport(
  */
 function tokensFromBytes(bytes: number): number {
   return Math.round(bytes / 4.1);
+}
+
+/**
+ * The command that actually turns a plugin off in the client that has it.
+ *
+ * Only Claude Code stores plugin enablement in settings, so `yard plugin
+ * disable` is a Claude-only lever — `actions.setPluginEnabled` refuses for the
+ * other two. Codex and Cursor treat an installed plugin as an enabled one, so
+ * their lever is the client's own uninstall. Printing a command that is going
+ * to refuse is worse than printing nothing.
+ */
+function pluginRemedy(client: Client, plugin: string): string {
+  return client === 'claude' ? `yard plugin disable ${plugin}` : `${client} plugin remove ${plugin}`;
 }
 
 /** The lines worth acting on first: expensive, and switchable off. */

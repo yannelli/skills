@@ -82,6 +82,46 @@ test('env inventory filters by kind and client', async () => {
   });
 });
 
+test('env inventory accepts the singular kind the CLI uses', async () => {
+  await withEnv(async ({ app }) => {
+    const res = await app.request('/api/env/inventory?kind=skill', { headers: HEADERS });
+    assert.equal(res.status, 200);
+    const inventory = (await res.json()) as Inventory;
+    assert.ok(inventory.skills.some((skill) => skill.name === 'alpha'));
+    assert.deepEqual(inventory.plugins, []);
+  });
+});
+
+/**
+ * A filter the route accepts but ignores is worse than one it refuses: the
+ * caller reads whole-machine numbers as if they were one client's.
+ */
+test('env context and doctor narrow to the client they are given', async () => {
+  await withEnv(async ({ app }) => {
+    const context = await app.request('/api/env/context?client=claude', { headers: HEADERS });
+    assert.equal(context.status, 200);
+    assert.deepEqual(((await context.json()) as { clients: string[] }).clients, ['claude']);
+
+    // The fixture home has Claude config and nothing else, so narrowing to
+    // another client has to leave the Claude skill out rather than ignore the
+    // filter and price it anyway.
+    const codex = await app.request('/api/env/context?client=codex', { headers: HEADERS });
+    assert.equal(codex.status, 200);
+    const report = (await codex.json()) as { clients: string[]; lines: Array<{ client: string }> };
+    assert.deepEqual(report.clients, []);
+    assert.ok(report.lines.every((line) => line.client !== 'claude'));
+
+    const doctor = await app.request('/api/env/doctor?client=codex', { headers: HEADERS });
+    assert.equal(doctor.status, 200);
+    const { diagnoses } = (await doctor.json()) as { diagnoses: Array<{ client?: string }> };
+    assert.ok(diagnoses.every((item) => item.client !== 'claude'));
+
+    const bogus = await app.request('/api/env/doctor?client=nope', { headers: HEADERS });
+    assert.equal(bogus.status, 400);
+    assert.match(((await bogus.json()) as { error: string }).error, /client/);
+  });
+});
+
 test('env context and doctor report without probing', async () => {
   await withEnv(async ({ app }) => {
     const context = await app.request('/api/env/context', { headers: HEADERS });

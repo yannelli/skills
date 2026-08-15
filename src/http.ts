@@ -202,8 +202,9 @@ export function createYardApp(catalog: Catalog, session: Session) {
   app.get(
     '/api/env/context',
     envRoute(async (c) => {
+      const client = clientParam(c.req.query('client'));
       const probe = probeParam(c.req.query('probe'));
-      const inventory = await scanEnvironment(process.cwd());
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
       return buildContextReport(inventory, { probe });
     })
   );
@@ -211,8 +212,9 @@ export function createYardApp(catalog: Catalog, session: Session) {
   app.get(
     '/api/env/doctor',
     envRoute(async (c) => {
+      const client = clientParam(c.req.query('client'));
       const probe = probeParam(c.req.query('probe'));
-      const inventory = await scanEnvironment(process.cwd());
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
       return { diagnoses: await diagnose(inventory, { probe }) };
     })
   );

@@ -7,6 +7,7 @@ import {
 } from '../env/context.js';
 import { scanEnvironment } from '../env/inventory.js';
 import { formatTokens } from '../env/tokens.js';
+import type { Client, Inventory } from '../env/types.js';
 import { commonOptions, flagBool, flagNumber, GLOBAL_FLAGS, rejectUnknownFlags, type Args } from './args.js';
 import { bar, colorEnabled, createStyle, percent, renderJson, renderTable, type Style } from './format.js';
 
@@ -26,7 +27,7 @@ export async function runContext(args: Args): Promise<number> {
 
   const offenders: ContextLine[] = topOffenders(report, 10).map((line) => ({
     ...line,
-    ...(line.remedy ? { remedy: qualify(line.remedy, line.client, report) } : {})
+    ...(line.remedy ? { remedy: qualify(line.remedy, line.client, inventory) } : {})
   }));
 
   if (options.json) {
@@ -127,11 +128,51 @@ function printLedger(report: ContextReport, offenders: ContextLine[], style: Sty
 }
 
 /**
- * The same server name is often configured in two clients. A bare
+ * The same name is often configured in two clients. A bare
  * `yard mcp disable context7` would then refuse as ambiguous, so the printed
  * command says which client it means.
+ *
+ * Ambiguity is a fact about the machine, not about this report: a plugin can
+ * own a costly skill in one client and sit installed-but-quiet in another, and
+ * the command would still refuse. So the inventory is what gets asked.
  */
-function qualify(remedy: string, client: string, report: ContextReport): string {
-  const sharing = new Set(report.lines.filter((line) => line.remedy === remedy).map((line) => line.client));
-  return sharing.size > 1 ? `${remedy} --client=${client}` : remedy;
+function qualify(remedy: string, client: string, inventory: Inventory): string {
+  const target = remedyTarget(remedy);
+  if (!target) {
+    return remedy;
+  }
+  const owners = new Set(target.owners(inventory));
+  return owners.size > 1 ? `${remedy} --client=${client}` : remedy;
+}
+
+/** Which name a remedy would make `yard` resolve, and where that name lives. */
+function remedyTarget(remedy: string): { owners: (inventory: Inventory) => Client[] } | undefined {
+  const mcp = /^yard mcp (?:enable|disable) (.+)$/.exec(remedy);
+  if (mcp?.[1]) {
+    const name = mcp[1];
+    return {
+      owners: (inventory) => inventory.mcpServers.filter((server) => server.name === name).map((s) => s.client)
+    };
+  }
+  const plugin = /^yard plugin (?:enable|disable) (.+)$/.exec(remedy);
+  if (plugin?.[1]) {
+    const name = plugin[1];
+    return {
+      owners: (inventory) =>
+        inventory.plugins
+          .filter((entry) => entry.name === name || entry.qualifiedName === name)
+          .map((entry) => entry.client)
+    };
+  }
+  const skill = /^yard skill (\S+) \S+$/.exec(remedy);
+  if (skill?.[1]) {
+    const name = skill[1];
+    return {
+      owners: (inventory) =>
+        inventory.skills
+          .filter((entry) => entry.name === name || entry.qualifiedName === name)
+          .map((entry) => entry.client)
+    };
+  }
+  return undefined;
 }

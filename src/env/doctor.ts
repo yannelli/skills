@@ -186,7 +186,12 @@ function checkPlugins(inventory: Inventory): Diagnosis[] {
         code: 'plugin-empty',
         summary: `${plugin.qualifiedName} is enabled but contributes nothing loadable`,
         ...(plugin.root ? { file: plugin.root } : {}),
-        remedy: `yard plugin disable ${plugin.qualifiedName}`
+        // `yard plugin disable` only works for Claude Code, which is the one
+        // client that keeps plugin enablement in a settings file.
+        remedy:
+          plugin.client === 'claude'
+            ? `yard plugin disable ${plugin.qualifiedName}`
+            : `${plugin.client} plugin remove ${plugin.qualifiedName}`
       });
     }
   }

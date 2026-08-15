@@ -3,7 +3,7 @@ import * as z from 'zod';
 import { adaptPlugin } from './adapt.js';
 import type { Catalog } from './catalog.js';
 import { indexOf } from './catalog.js';
-import { actionTarget, DEFAULT_ROW_LIMIT, ENV_KINDS, summarizeInventory } from './env-api.js';
+import { actionTarget, DEFAULT_ROW_LIMIT, ENV_KINDS, summarizeInventory, toEnvKind } from './env-api.js';
 import { setMcpEnabled, setPluginEnabled, setSkillEnabled, setSkillVisibility } from './env/actions.js';
 import { buildContextReport } from './env/context.js';
 import { diagnose } from './env/doctor.js';
@@ -15,7 +15,18 @@ import type { Session } from './session.js';
 import { ARTIFACT_KINDS } from './types.js';
 
 const KindSchema = z.enum(ARTIFACT_KINDS);
-const EnvKindSchema = z.enum(ENV_KINDS);
+
+/**
+ * The schema advertises the canonical plural vocabulary, which is what a model
+ * reading it will send. It also quietly accepts the singular the CLI uses
+ * (`--kind=skill`), because a model that has read the docs guessing `skill`
+ * should not have to spend a turn learning that this surface pluralises. Same
+ * rule the HTTP query parameter follows.
+ */
+const EnvKindSchema = z.preprocess(
+  (value) => (typeof value === 'string' ? (toEnvKind(value) ?? value) : value),
+  z.enum(ENV_KINDS)
+);
 const ClientSchema = z.enum(CLIENTS);
 const ScopeSchema = z.enum(['user', 'project', 'local']);
 const VisibilitySchema = z.enum(SKILL_VISIBILITIES);
@@ -254,6 +265,7 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
       description:
         'Estimated tokens every turn spends on skill listings, MCP tool schemas, subagents, commands, and memory files, with the biggest offenders and the command that turns each one off. Use it when the user asks why context is tight or what their setup costs. Nothing is written. With probe true it starts the user’s configured MCP servers to read their real tool schemas, which runs those commands — leave it off unless the user asked for exact MCP numbers.',
       inputSchema: z.object({
+        client: ClientSchema.optional().describe('Price one client only. Defaults to every installed client.'),
         probe: z
           .boolean()
           .optional()
@@ -261,8 +273,8 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
       }),
       annotations: { readOnlyHint: true }
     },
-    async ({ probe }) => {
-      const inventory = await scanEnvironment(process.cwd());
+    async ({ client, probe }) => {
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
       const report = await buildContextReport(inventory, { probe: probe === true });
       const lines = report.lines.slice(0, MAX_REPORT_LINES);
       return textResult({
@@ -287,12 +299,13 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
       description:
         'Find what is quietly broken: hooks pointing at deleted scripts, skills the model can never see, duplicate skill names, plugins that are enabled but not installed, unparseable config. Use it when a skill, hook, or MCP server does not behave as the user expects. Nothing is written. With probe true it starts the user’s configured MCP servers to find out which ones actually come up, which runs those commands — leave it off unless the user asked.',
       inputSchema: z.object({
+        client: ClientSchema.optional().describe('Diagnose one client only. Defaults to every installed client.'),
         probe: z.boolean().optional().describe('Start each configured MCP server to check it responds. Defaults to false.')
       }),
       annotations: { readOnlyHint: true }
     },
-    async ({ probe }) => {
-      const inventory = await scanEnvironment(process.cwd());
+    async ({ client, probe }) => {
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
       const diagnoses = await diagnose(inventory, { probe: probe === true });
       const shown = diagnoses.slice(0, MAX_REPORT_LINES);
       return textResult({

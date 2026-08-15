@@ -37,7 +37,7 @@ type Common = {
 export async function setSkillVisibility(
   opts: Common & { skill: string; visibility: SkillVisibility }
 ): Promise<ActionResult> {
-  const client = await resolveClient(opts, (inventory) =>
+  const client = await resolveClient(opts, `skill "${opts.skill}"`, (inventory) =>
     inventory.skills.filter((skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill)
   );
 
@@ -69,7 +69,7 @@ export async function setSkillVisibility(
 
 /** Enable or disable a personal skill by moving its directory. */
 export async function setSkillEnabled(opts: Common & { skill: string; enabled: boolean }): Promise<ActionResult> {
-  const client = await resolveClient(opts, (inventory) =>
+  const client = await resolveClient(opts, `skill "${opts.skill}"`, (inventory) =>
     inventory.skills.filter((skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill)
   );
 
@@ -108,7 +108,7 @@ export async function setSkillEnabled(opts: Common & { skill: string; enabled: b
 }
 
 export async function setPluginEnabled(opts: Common & { plugin: string; enabled: boolean }): Promise<ActionResult> {
-  const client = await resolveClient(opts, (inventory) =>
+  const client = await resolveClient(opts, `plugin "${opts.plugin}"`, (inventory) =>
     inventory.plugins.filter((plugin) => plugin.qualifiedName === opts.plugin || plugin.name === opts.plugin)
   );
 
@@ -140,7 +140,7 @@ export async function setPluginEnabled(opts: Common & { plugin: string; enabled:
 }
 
 export async function setMcpEnabled(opts: Common & { server: string; enabled: boolean }): Promise<ActionResult> {
-  const client = await resolveClient(opts, (inventory) =>
+  const client = await resolveClient(opts, `mcp server "${opts.server}"`, (inventory) =>
     inventory.mcpServers.filter((server) => server.name === opts.server)
   );
 
@@ -189,29 +189,45 @@ export async function setMcpEnabled(opts: Common & { server: string; enabled: bo
 }
 
 /**
- * Work out which client a bare name refers to. An explicit `client` wins; a
- * name found in exactly one client is unambiguous; anything else is an error
- * naming the candidates, because guessing would edit the wrong config.
+ * Work out which client a bare name refers to. An explicit `client` narrows the
+ * search rather than skipping it — a name that client does not have would
+ * otherwise be written into its config as a setting for something that does not
+ * exist. A name found in exactly one client is unambiguous; anything else is an
+ * error naming the subject and the candidates, because guessing would edit the
+ * wrong config.
  */
 async function resolveClient(
   opts: Common,
+  subject: string,
   matches: (inventory: Inventory) => Array<{ client: Client; id: string }>
 ): Promise<Client> {
-  if (opts.client) {
-    return opts.client;
-  }
   const inventory = opts.inventory ?? (await scanEnvironment(opts.projectRoot));
   const found = matches(inventory);
   const clients = [...new Set(found.map((item) => item.client))];
+
+  if (opts.client) {
+    if (clients.includes(opts.client)) {
+      return opts.client;
+    }
+    throw new Error(
+      clients.length
+        ? `${subject} not found in ${opts.client} — it is in ${clients.join(', ')}`
+        : `${subject} not found in ${opts.client} — run \`yard scan\` to see what is there`
+    );
+  }
 
   if (clients.length === 1 && clients[0]) {
     return clients[0];
   }
   if (clients.length === 0) {
-    throw new Error('not found in any installed client — run `yard scan` to see what is there');
+    throw new Error(`${subject} not found in any installed client — run \`yard scan\` to see what is there`);
   }
+  // Names the option, not one surface's spelling of it: the CLI writes
+  // `--client=codex`, the HTTP body writes `"client": "codex"`, and an MCP tool
+  // takes a `client` argument. Telling an API caller to "pass --client" sends
+  // them looking for a flag their surface does not have.
   throw new Error(
-    `ambiguous across ${clients.join(', ')} — pass --client to choose (matched ${found
+    `${subject} is ambiguous across ${clients.join(', ')} — set client to one of them (matched ${found
       .map((item) => item.id)
       .join(', ')})`
   );
