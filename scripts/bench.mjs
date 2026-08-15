@@ -29,6 +29,8 @@ const scaleArg = process.argv.find((a) => a.startsWith('--scale='));
 const SCALE = scaleArg ? Number(scaleArg.split('=')[1]) : 1;
 const JSON_OUT = args.has('--json');
 
+const SAVINGS = args.has('--savings');
+
 const WARMUP = 2;
 const RUNS = 7;
 
@@ -55,8 +57,10 @@ function prose(seed, sentences) {
   return out.join(' ');
 }
 
+// Four sentences of description ≈ 55-60 tokens per skill in the listing, which
+// is what the real setup in the README averaged (27.1k over 457 skills).
 function skillMd(name, seed) {
-  return `---\nname: ${name}\ndescription: ${prose(seed, 1)}\n---\n\n# ${name}\n\n${prose(seed, 12)}\n\n## Usage\n\n${prose(seed + 1, 10)}\n`;
+  return `---\nname: ${name}\ndescription: ${prose(seed, 4)}\n---\n\n# ${name}\n\n${prose(seed, 12)}\n\n## Usage\n\n${prose(seed + 1, 10)}\n`;
 }
 
 function write(file, contents) {
@@ -132,10 +136,12 @@ function buildFixture(scale) {
     const event = i % 2 === 0 ? 'PreToolUse' : 'PostToolUse';
     claudeHooks[event].push({ matcher: 'Bash', hooks: [{ type: 'command', command: `node ${hookScript}` }] });
   }
-  write(
-    path.join(home, '.claude', 'settings.json'),
-    JSON.stringify({ enabledPlugins, hooks: claudeHooks }, null, 2)
-  );
+  const writeClaudeSettings = (overrides = {}) =>
+    write(
+      path.join(home, '.claude', 'settings.json'),
+      JSON.stringify({ enabledPlugins, hooks: claudeHooks, ...overrides }, null, 2)
+    );
+  writeClaudeSettings();
 
   const codexMcp = [];
   for (let i = 0; i < counts.codexMcp; i += 1) {
@@ -178,7 +184,14 @@ function buildFixture(scale) {
     )
   );
 
-  return { root, home, project };
+  return {
+    root,
+    home,
+    project,
+    writeClaudeSettings,
+    personalClaudeSkills: Array.from({ length: counts.claudeSkills }, (_, i) => `claude-skill-${i}`),
+    pluginCount: counts.plugins
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +243,55 @@ function hasBun() {
   return probe.status === 0;
 }
 
+function contextReport(env, projectFlag) {
+  return JSON.parse(
+    execFileSync('node', [cli, 'context', '--json', projectFlag], {
+      env,
+      encoding: 'utf8',
+      maxBuffer: 256 * 1024 * 1024
+    })
+  );
+}
+
+/**
+ * What each mode gives back, measured by pricing the same setup again after
+ * writing the mode into the fixture's settings — the identical read path
+ * `yard context` uses on a real machine, priced by Yard's own estimator.
+ */
+function measureSavings(fixture, env, projectFlag) {
+  const baseline = contextReport(env, projectFlag);
+  const skills = fixture.personalClaudeSkills;
+
+  const modeTotal = (visibility) => {
+    fixture.writeClaudeSettings({
+      skillOverrides: Object.fromEntries(skills.map((name) => [name, visibility]))
+    });
+    return contextReport(env, projectFlag).total;
+  };
+
+  const modes = {};
+  for (const visibility of ['name-only', 'user-invocable-only', 'off']) {
+    modes[visibility] = baseline.total - modeTotal(visibility);
+  }
+  if (modes['user-invocable-only'] !== modes.off) {
+    throw new Error('user-invocable-only and off should save identically: both leave the listing');
+  }
+  fixture.writeClaudeSettings();
+
+  // Plugins off: rewrite enabledPlugins to false wholesale.
+  const enabledPlugins = Object.fromEntries(
+    Array.from({ length: fixture.pluginCount }, (_, i) => [`plugin-${i}@bench-marketplace`, false])
+  );
+  fixture.writeClaudeSettings({ enabledPlugins });
+  const pluginsSaved = baseline.total - contextReport(env, projectFlag).total;
+  fixture.writeClaudeSettings();
+
+  const mcpLines = baseline.lines.filter((line) => line.kind === 'mcp');
+  const mcpSaved = mcpLines.reduce((sum, line) => sum + line.tokens, 0);
+
+  return { baseline, modes, pluginsSaved, mcpCount: mcpLines.length, mcpSaved };
+}
+
 function main() {
   const fixture = buildFixture(SCALE);
   const env = { ...process.env, YARD_HOME: fixture.home, NO_COLOR: '1' };
@@ -260,6 +322,54 @@ function main() {
       memory: totals.memory ?? 0,
       estimatedTokensPerTurn: contextJson.total
     };
+
+    if (SAVINGS) {
+      const savings = measureSavings(fixture, env, projectFlag);
+      const skillCount = fixture.personalClaudeSkills.length;
+      const per = (saved, count) => Math.round(saved / count);
+      const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+      if (JSON_OUT) {
+        console.log(
+          JSON.stringify(
+            {
+              setup,
+              personalClaudeSkills: skillCount,
+              savings: {
+                'name-only': savings.modes['name-only'],
+                'user-invocable-only': savings.modes['user-invocable-only'],
+                off: savings.modes.off,
+                pluginsDisabled: savings.pluginsSaved,
+                mcpDisabled: { servers: savings.mcpCount, tokens: savings.mcpSaved, measured: false }
+              }
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      console.log(
+        `setup: ${setup.skills} skills, ${setup.plugins} plugins, ${setup.mcpServers} MCP servers ` +
+          `— ${k(savings.baseline.total)} estimated tokens per turn\n`
+      );
+      const minus = (n) => `-${k(n)}`.padStart(7);
+      console.log(`  yard skill <name> …          all ${skillCount} personal Claude skills`);
+      for (const mode of ['name-only', 'user-invocable-only', 'off']) {
+        const saved = savings.modes[mode];
+        console.log(`    ${mode.padEnd(22)} ${minus(saved)}  (${per(saved, skillCount)} per skill)`);
+      }
+      console.log(
+        `  yard plugin disable, all ${setup.plugins}   ${minus(savings.pluginsSaved)}  (${per(savings.pluginsSaved, setup.plugins)} per plugin)`
+      );
+      // Not credited to `yard mcp disable`: it refuses for codex servers,
+      // which own their config.toml. The tokens come back either way.
+      console.log(
+        `  all ${savings.mcpCount} live MCP servers off   ${minus(savings.mcpSaved)}  (estimated: unprobed servers)`
+      );
+      return;
+    }
 
     const runtimes = ['node', ...(hasBun() ? ['bun'] : [])];
     // doctor may exit 1 by design when a setup has real errors; this fixture

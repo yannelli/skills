@@ -172,18 +172,45 @@ is labelled as an estimate everywhere it appears.
 
 ## Benchmarks
 
+Both tables run against a setup generated fresh in a tmpdir, shaped like the one in "Why" — 457
+skills (71 of them from plugins), 71 plugins, 10 MCP servers, 27 hooks, 34.8k estimated tokens per
+turn — without touching anything you have configured.
+
+### What each mode gives back
+
+Measured by writing each mode into the generated settings and pricing the setup again with Yard's
+own estimator — the same read path `yard context` takes on your machine. Token counts, not timings,
+so they reproduce exactly. `bun run bench -- --savings`.
+
+| | applied to | saved per turn |
+|---|---|---|
+| `yard skill <name> name-only` | 150 personal skills | 7.4k — 49 per skill |
+| `yard skill <name> user-invocable-only` | 150 personal skills | 8.4k — 56 per skill |
+| `yard skill <name> off` | 150 personal skills | 8.4k — identical |
+| `yard plugin disable`, all 71 | 71 plugin skills | 4.1k — 58 per plugin |
+| every live MCP server off | 6 servers | 7.2k (estimated) |
+
+`user-invocable-only` saves exactly what `off` saves — the difference between the two is the `/`
+picker, never tokens — which is why it is the right setting for anything you invoke by hand.
+`name-only` keeps ~7 tokens of name per skill in the listing. The MCP row is not credited to
+`yard mcp disable`: three of the six servers are Codex's, Codex owns its `config.toml`, and Yard
+refuses to edit it. The unprobed flat estimates are labelled, as everywhere.
+
+Measuring this found a bug, fixed here: disabling a plugin did not stop the ledger from billing
+its skills, so `yard plugin disable` saved zero on paper until it saved 4.1k.
+
+### How fast
+
 Median of 7 runs after 2 warmups, full process wall time with stdout to `/dev/null`, on an 8-core
-Neoverse-V3 (AWS Graviton), node v24, bun 1.3. The setup is generated fresh in a tmpdir and mirrors
-the shape of the one in "Why" — 457 skills (71 of them from plugins), 71 plugins, 10 MCP servers,
-27 hooks — without touching anything you have configured. `bun run bench` reproduces the first
-column, `bun run bench -- --scale=10` the second.
+Neoverse-V3 (AWS Graviton), node v24, bun 1.3. `bun run bench` reproduces the first column,
+`bun run bench -- --scale=10` the second.
 
 | | 457 skills (node / bun) | 4,570 skills (node / bun) |
 |---|---|---|
-| `yard scan` | 119 / 91 ms | 395 / 228 ms |
-| `yard context` | 122 / 95 ms | 421 / 260 ms |
-| `yard doctor` | 121 / 92 ms | 395 / 230 ms |
-| cold start (`--help`) | 67 / 60 ms | same |
+| `yard scan` | 118 / 92 ms | 393 / 228 ms |
+| `yard context` | 126 / 102 ms | 446 / 296 ms |
+| `yard doctor` | 119 / 92 ms | 396 / 231 ms |
+| cold start (`--help`) | 68 / 59 ms | same |
 
 The shape is a fixed floor plus a linear walk: ~90 ms of startup under node — 67 ms of it bare
 runtime, the rest first reads — then ~30 ms for each further README-sized helping of config, half
@@ -192,9 +219,8 @@ scanning gets cheaper per file.
 
 Token estimation is never the slow part: the estimator runs at 30–36 MB/s single-threaded
 (`bun scripts/bench-tokens.ts`), so pricing the whole 457-skill setup takes under a millisecond of
-those 122 ms. The fixture's ~18k-token total includes flat per-server estimates for its unprobed
-MCP servers — estimates, labelled as such, like everywhere else in Yard. `--probe` is deliberately
-not benchmarked: it starts your MCP servers, and its cost is theirs.
+those 126 ms. `--probe` is deliberately not benchmarked: it starts your MCP servers, and its cost
+is theirs.
 
 ## Development
 
