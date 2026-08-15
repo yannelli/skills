@@ -170,6 +170,32 @@ under-count JSON. Expect roughly ±10% against a real tokenizer and consistent r
 enough to answer "what is eating my context", which is the question. Anything Yard did not measure
 is labelled as an estimate everywhere it appears.
 
+## Benchmarks
+
+Median of 7 runs after 2 warmups, full process wall time with stdout to `/dev/null`, on an 8-core
+Neoverse-V3 (AWS Graviton), node v24, bun 1.3. The setup is generated fresh in a tmpdir and mirrors
+the shape of the one in "Why" — 457 skills (71 of them from plugins), 71 plugins, 10 MCP servers,
+27 hooks — without touching anything you have configured. `bun run bench` reproduces the first
+column, `bun run bench -- --scale=10` the second.
+
+| | 457 skills (node / bun) | 4,570 skills (node / bun) |
+|---|---|---|
+| `yard scan` | 119 / 91 ms | 395 / 228 ms |
+| `yard context` | 122 / 95 ms | 421 / 260 ms |
+| `yard doctor` | 121 / 92 ms | 395 / 230 ms |
+| cold start (`--help`) | 67 / 60 ms | same |
+
+The shape is a fixed floor plus a linear walk: ~90 ms of startup under node — 67 ms of it bare
+runtime, the rest first reads — then ~30 ms for each further README-sized helping of config, half
+that under bun. A tenfold setup costs 3.3× the wall clock because the floor amortises, not because
+scanning gets cheaper per file.
+
+Token estimation is never the slow part: the estimator runs at 30–36 MB/s single-threaded
+(`bun scripts/bench-tokens.ts`), so pricing the whole 457-skill setup takes under a millisecond of
+those 122 ms. The fixture's ~18k-token total includes flat per-server estimates for its unprobed
+MCP servers — estimates, labelled as such, like everywhere else in Yard. `--probe` is deliberately
+not benchmarked: it starts your MCP servers, and its cost is theirs.
+
 ## Development
 
 ```bash

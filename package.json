@@ -22,6 +22,7 @@
     "build:web": "bun run --cwd web build",
     "dev:web": "bun run --cwd web dev",
     "validate": "node scripts/validate.mjs",
+    "bench": "node scripts/bench.mjs",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit && bun run --cwd web typecheck"
   },
