@@ -3,7 +3,7 @@
 ## Add a plugin
 
 1. `yard new <name> "<description>"`, or copy `templates/plugin` to `plugins/<name>`, or use the
-   Author tab. To import a Claude-only skill or plugin, `npm run adapt -- <path>` — it writes the
+   Author tab. To import a Claude-only skill or plugin, `bun run adapt -- <path>` — it writes the
    files that are missing and leaves existing ones alone.
 2. Replace `PLUGIN_NAME` / `PLUGIN_DESCRIPTION`. Rename `skills/PLUGIN_NAME`.
 3. Register the same name and `./plugins/<name>` source in all three catalogs:
@@ -11,7 +11,7 @@
    `category`), `.cursor-plugin/marketplace.json`.
 4. Keep `name` and `version` in sync across the four manifests.
 5. Every `SKILL.md` needs `name` and `description` frontmatter.
-6. `npm run validate && npm test`
+6. `bun run validate && bun run test`
 
 Names are kebab-case. The marketplace id is `yannelli-skills`.
 
@@ -42,7 +42,7 @@ name that would never fire.
 `mcp.json` at the plugin root is Agent Plugins 1.0 compliance. No shipping client reads it today; it
 is kept for forward compatibility and is optional.
 
-Run `npm run sync-mcp` to write all four from one spec in `src/mcp-spec.ts`. `npm run validate`
+Run `bun run sync-mcp` to write all four from one spec in `src/mcp-spec.ts`. `bun run validate`
 fails if they drift, if Cursor is missing the inline block, or if the inline block leaks
 `${CLAUDE_PLUGIN_ROOT}`.
 
@@ -83,10 +83,18 @@ Tests use `node:test` and point the whole layer at a fixture tree with `YARD_HOM
 touch a real `~/.claude`, `~/.codex`, or `~/.cursor`, or probe a real MCP server.
 
 ```bash
-npm test
-npm run validate
-npm run typecheck
-npm run build
+bun install && bun install --cwd web
+bun run test
+bun run validate
+bun run typecheck
+bun run build
 ```
 
-The UI lives in `web/`. `npm run build:web` writes `plugins/yard/public`, which is committed.
+Mind the difference between `bun run test` and `bun test`: the shipped CLI runs on node, so the
+suite runs on node too (`tsx --test`), and `bun run test` keeps it that way. `bun test` — bun's own
+runner — currently fails the CLI subprocess tests because `process.execPath` is bun, not node.
+
+No bun? Every script also runs under npm: `npm install && npm --prefix web install`, then
+`npm run <script>`. CI uses the npm path.
+
+The UI lives in `web/`. `bun run build:web` writes `plugins/yard/public`, which is committed.

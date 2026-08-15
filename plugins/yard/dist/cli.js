@@ -2823,9 +2823,9 @@ async function buildContextReport(inventory, options = {}) {
       tokens,
       measured: true,
       ...skill.description.length > maxDescChars ? { detail: `description truncated at ${maxDescChars} chars` } : {},
-      // A plugin skill cannot be switched off individually — Claude Code's
-      // skillOverrides deliberately does not apply to them — so the lever is
-      // the plugin. Saying so is more useful than leaving the row blank.
+      // A plugin skill can be overridden via its `<plugin>:<skill>` key, but
+      // the natural switch — and the one that also drops the plugin's hooks
+      // and servers — is the plugin itself, so that is the remedy shown.
       ...skill.scope === "plugin" && skill.plugin ? { remedy: pluginRemedy(skill.client, skill.plugin) } : skill.client === "claude" ? { remedy: `yard skill ${skill.qualifiedName} user-invocable-only` } : {}
     });
   }
@@ -2838,6 +2838,7 @@ async function buildContextReport(inventory, options = {}) {
   }
   for (const server of enabledServers) {
     const probe = probes.find((result) => result.id === server.id);
+    const remedy = server.client === "codex" ? {} : { remedy: `yard mcp disable ${server.name}` };
     if (probe?.ok) {
       lines.push({
         id: server.id,
@@ -2847,7 +2848,7 @@ async function buildContextReport(inventory, options = {}) {
         tokens: probe.totalTokens,
         measured: true,
         detail: `${probe.tools.length} tools`,
-        remedy: `yard mcp disable ${server.name}`
+        ...remedy
       });
       continue;
     }
@@ -2859,7 +2860,7 @@ async function buildContextReport(inventory, options = {}) {
       tokens: UNPROBED_MCP_TOKENS,
       measured: false,
       detail: probe?.error ?? (options.probe ? "probe failed" : "not probed \u2014 run with --probe for the real cost"),
-      remedy: `yard mcp disable ${server.name}`
+      ...remedy
     });
   }
   if (!options.probe && enabledServers.length) {
@@ -3334,7 +3335,7 @@ async function scanSkillDir(dir, opts, settings, warnings, seen) {
 }
 function resolveVisibility(qualifiedName, name, opts, settings, skillDir) {
   if (opts.disabled) {
-    return { visibility: "off", source: path9.dirname(skillDir) };
+    return { visibility: "off", source: opts.disabledSource ?? path9.dirname(skillDir) };
   }
   for (const key of opts.plugin ? [qualifiedName] : [name]) {
     const override = settings.skillOverrides[key];
@@ -3748,7 +3749,14 @@ async function discoverPluginComponents(root, owner, settings, warnings) {
   components.skills.push(
     ...await scanSkillDir(
       path9.join(root, "skills"),
-      { scope: "plugin", plugin, skillDirs },
+      // A disabled plugin loads nothing, so its skills are `off` — otherwise
+      // the context ledger keeps billing them after `yard plugin disable`.
+      {
+        scope: "plugin",
+        plugin,
+        skillDirs,
+        ...enabled ? {} : { disabled: true, ...owner.enabledSource ? { disabledSource: owner.enabledSource } : {} }
+      },
       settings,
       warnings
     )

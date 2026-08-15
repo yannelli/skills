@@ -6,7 +6,8 @@
   "description": "Cross-client agent marketplace with an installable Yard MCP for just-in-time skill hydration.",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "bun": ">=1.2"
   },
   "bin": {
     "yard": "plugins/yard/dist/cli.js"
@@ -21,6 +22,7 @@
     "build:web": "npm --prefix web run build",
     "dev:web": "npm --prefix web run dev",
     "validate": "node scripts/validate.mjs",
+    "bench": "node scripts/bench.mjs",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit && npm --prefix web run typecheck"
   },

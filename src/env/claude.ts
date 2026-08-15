@@ -579,7 +579,7 @@ function mergeSettings(
 
 async function scanSkillDir(
   dir: string,
-  opts: { scope: Scope; disabled?: boolean; plugin?: string; skillDirs?: string[] },
+  opts: { scope: Scope; disabled?: boolean; disabledSource?: string; plugin?: string; skillDirs?: string[] },
   settings: ClaudeSettingsView,
   warnings: ScanWarning[],
   seen?: Set<string>
@@ -637,12 +637,14 @@ async function scanSkillDir(
 function resolveVisibility(
   qualifiedName: string,
   name: string,
-  opts: { scope: Scope; disabled?: boolean; plugin?: string },
+  opts: { scope: Scope; disabled?: boolean; disabledSource?: string; plugin?: string },
   settings: ClaudeSettingsView,
   skillDir: string
 ): { visibility: SkillVisibility; source?: string } {
   if (opts.disabled) {
-    return { visibility: 'off', source: path.dirname(skillDir) };
+    // A parked personal skill is off because of where it sits; a disabled
+    // plugin's skill is off because a settings file said so.
+    return { visibility: 'off', source: opts.disabledSource ?? path.dirname(skillDir) };
   }
   // Plugin skills are keyed by `<plugin>:<skill>` and nothing else: a live
   // install's settings.json disables them exactly that way, and matching on the
@@ -1186,7 +1188,16 @@ async function discoverPluginComponents(
   components.skills.push(
     ...(await scanSkillDir(
       path.join(root, 'skills'),
-      { scope: 'plugin', plugin, skillDirs },
+      // A disabled plugin loads nothing, so its skills are `off` — otherwise
+      // the context ledger keeps billing them after `yard plugin disable`.
+      {
+        scope: 'plugin',
+        plugin,
+        skillDirs,
+        ...(enabled
+          ? {}
+          : { disabled: true, ...(owner.enabledSource ? { disabledSource: owner.enabledSource } : {}) })
+      },
       settings,
       warnings
     ))

@@ -714,6 +714,19 @@ test('plugin skill visibility follows the plugin-qualified key only', async () =
   });
 });
 
+test('a disabled plugin turns its skills off, so context stops billing them', async () => {
+  await withFixture(async (fixture) => {
+    await buildInstall(fixture);
+    await writeJson(path.join(fixture.project, '.claude', 'settings.local.json'), {
+      enabledPlugins: { 'demo@acme': false }
+    });
+    const scan = await scanClaude(fixture.project);
+    const alpha = scan.skills.find((entry) => entry.qualifiedName === 'demo:alpha');
+    assert.ok(alpha);
+    assert.equal(alpha.visibility, 'off');
+  });
+});
+
 test('a plugin .mcp.json without the mcpServers wrapper still counts', async () => {
   await withFixture(async (fixture) => {
     await buildInstall(fixture);
