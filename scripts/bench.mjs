@@ -190,6 +190,8 @@ function buildFixture(scale) {
     project,
     writeClaudeSettings,
     personalClaudeSkills: Array.from({ length: counts.claudeSkills }, (_, i) => `claude-skill-${i}`),
+    // Plugin skills are addressed by their plugin-qualified name.
+    pluginSkills: Array.from({ length: counts.plugins }, (_, i) => `plugin-${i}:plugin-${i}`),
     pluginCount: counts.plugins
   };
 }
@@ -276,6 +278,15 @@ function measureSavings(fixture, env, projectFlag) {
   if (modes['user-invocable-only'] !== modes.off) {
     throw new Error('user-invocable-only and off should save identically: both leave the listing');
   }
+
+  // The same modes work on plugin skills, keyed `<plugin>:<skill>`.
+  const pluginModes = {};
+  for (const visibility of ['name-only', 'off']) {
+    fixture.writeClaudeSettings({
+      skillOverrides: Object.fromEntries(fixture.pluginSkills.map((name) => [name, visibility]))
+    });
+    pluginModes[visibility] = baseline.total - contextReport(env, projectFlag).total;
+  }
   fixture.writeClaudeSettings();
 
   // Plugins off: rewrite enabledPlugins to false wholesale.
@@ -286,10 +297,19 @@ function measureSavings(fixture, env, projectFlag) {
   const pluginsSaved = baseline.total - contextReport(env, projectFlag).total;
   fixture.writeClaudeSettings();
 
+  // In this fixture plugins ship only skills, so turning every plugin skill
+  // off must reclaim exactly what disabling every plugin does.
+  if (pluginModes.off !== pluginsSaved) {
+    throw new Error(
+      `plugin skills off saved ${pluginModes.off} but plugin disable saved ${pluginsSaved}; ` +
+        'the fixture plugins ship only skills, so these must match'
+    );
+  }
+
   const mcpLines = baseline.lines.filter((line) => line.kind === 'mcp');
   const mcpSaved = mcpLines.reduce((sum, line) => sum + line.tokens, 0);
 
-  return { baseline, modes, pluginsSaved, mcpCount: mcpLines.length, mcpSaved };
+  return { baseline, modes, pluginModes, pluginsSaved, mcpCount: mcpLines.length, mcpSaved };
 }
 
 function main() {
@@ -339,6 +359,7 @@ function main() {
                 'name-only': savings.modes['name-only'],
                 'user-invocable-only': savings.modes['user-invocable-only'],
                 off: savings.modes.off,
+                pluginSkills: savings.pluginModes,
                 pluginsDisabled: savings.pluginsSaved,
                 mcpDisabled: { servers: savings.mcpCount, tokens: savings.mcpSaved, measured: false }
               }
@@ -359,6 +380,11 @@ function main() {
       for (const mode of ['name-only', 'user-invocable-only', 'off']) {
         const saved = savings.modes[mode];
         console.log(`    ${mode.padEnd(22)} ${minus(saved)}  (${per(saved, skillCount)} per skill)`);
+      }
+      console.log(`  yard skill <plugin>:<name> … all ${setup.plugins} plugin skills`);
+      for (const mode of ['name-only', 'off']) {
+        const saved = savings.pluginModes[mode];
+        console.log(`    ${mode.padEnd(22)} ${minus(saved)}  (${per(saved, setup.plugins)} per skill)`);
       }
       console.log(
         `  yard plugin disable, all ${setup.plugins}   ${minus(savings.pluginsSaved)}  (${per(savings.pluginsSaved, setup.plugins)} per plugin)`

@@ -187,14 +187,18 @@ so they reproduce exactly. `bun run bench -- --savings`.
 | `yard skill <name> name-only` | 150 personal skills | 7.4k — 49 per skill |
 | `yard skill <name> user-invocable-only` | 150 personal skills | 8.4k — 56 per skill |
 | `yard skill <name> off` | 150 personal skills | 8.4k — identical |
+| `yard skill <plugin>:<name> name-only` | 71 plugin skills | 3.5k — 49 per skill |
 | `yard plugin disable`, all 71 | 71 plugin skills | 4.1k — 58 per plugin |
 | every live MCP server off | 6 servers | 7.2k (estimated) |
 
 `user-invocable-only` saves exactly what `off` saves — the difference between the two is the `/`
 picker, never tokens — which is why it is the right setting for anything you invoke by hand.
-`name-only` keeps ~7 tokens of name per skill in the listing. The MCP row is not credited to
-`yard mcp disable`: three of the six servers are Codex's, Codex owns its `config.toml`, and Yard
-refuses to edit it. The unprobed flat estimates are labelled, as everywhere.
+`name-only` keeps ~7 tokens of name per skill in the listing, and works on plugin skills too via
+their `<plugin>:<skill>` key; setting all 71 to `off` instead reclaims exactly what disabling their
+plugins does, and the bench asserts that identity. There is no `name-only` for MCP — no client can
+load a server's tool names without their schemas — so the only MCP lever is off. That row is not
+credited to `yard mcp disable`: three of the six servers are Codex's, Codex owns its `config.toml`,
+and Yard refuses to edit it. The unprobed flat estimates are labelled, as everywhere.
 
 Measuring this found a bug, fixed here: disabling a plugin did not stop the ledger from billing
 its skills, so `yard plugin disable` saved zero on paper until it saved 4.1k.
