@@ -1,0 +1,44 @@
+{
+  "name": "yannelli-skills",
+  "interface": {
+    "displayName": "Yannelli Skills"
+  },
+  "plugins": [
+    {
+      "name": "hello",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hello"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/review"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "yard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/yard"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

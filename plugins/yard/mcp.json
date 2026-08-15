@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "yard": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "./dist/cli.js",
+        "--stdio"
+      ],
+      "cwd": "./"
+    }
+  }
+}

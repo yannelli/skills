@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "yannelli-skills",
+  "version": "0.1.0",
+  "description": "Cross-client agent marketplace: plugins, skills, rules, hooks. Local Yard MCP for just-in-time hydration.",
+  "owner": {
+    "name": "Ryan Yannelli",
+    "email": "ryanyannelli@gmail.com",
+    "url": "https://github.com/yannelli"
+  },
+  "metadata": {
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "hello",
+      "source": "./plugins/hello",
+      "description": "Confirms marketplace install. Greeting skill, concise-reply rule, session-start hooks.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Ryan Yannelli",
+        "email": "ryanyannelli@gmail.com"
+      },
+      "category": "example",
+      "tags": ["hello", "scaffold"],
+      "license": "MIT"
+    },
+    {
+      "name": "review",
+      "source": "./plugins/review",
+      "description": "Concise code review skill. Meant to be searched and hydrated, not preloaded.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Ryan Yannelli",
+        "email": "ryanyannelli@gmail.com"
+      },
+      "category": "productivity",
+      "tags": ["review", "scaffold"],
+      "license": "MIT"
+    },
+    {
+      "name": "yard",
+      "source": "./plugins/yard",
+      "description": "Local control plane. Search, hydrate, and attach marketplace skills, hooks, and MCP over stdio.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Ryan Yannelli",
+        "email": "ryanyannelli@gmail.com"
+      },
+      "category": "productivity",
+      "tags": ["yard", "mcp", "catalog"],
+      "license": "MIT"
+    }
+  ]
+}

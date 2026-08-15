@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "yard": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/cli.js",
+        "--stdio"
+      ],
+      "env": {
+        "YARD_ROOT": "${CLAUDE_PROJECT_DIR}"
+      }
+    }
+  }
+}

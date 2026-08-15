@@ -1,0 +1,13 @@
+{
+  "name": "hello",
+  "description": "Confirms the marketplace installed. Greeting skill, a concise-reply rule, and session-start hooks.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Ryan Yannelli",
+    "email": "ryanyannelli@gmail.com"
+  },
+  "homepage": "https://github.com/yannelli/skills",
+  "repository": "https://github.com/yannelli/skills",
+  "license": "MIT",
+  "keywords": ["hello", "example", "scaffold"]
+}

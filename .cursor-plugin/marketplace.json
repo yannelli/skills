@@ -1,0 +1,38 @@
+{
+  "name": "yannelli-skills",
+  "owner": {
+    "name": "Ryan Yannelli",
+    "email": "ryanyannelli@gmail.com"
+  },
+  "metadata": {
+    "description": "Cross-client agent marketplace: plugins, skills, rules, hooks.",
+    "version": "0.1.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "hello",
+      "source": "./plugins/hello",
+      "description": "Confirms marketplace install. Greeting skill, concise-reply rule, session-start hooks.",
+      "version": "0.1.0",
+      "category": "example",
+      "tags": ["hello", "scaffold"]
+    },
+    {
+      "name": "review",
+      "source": "./plugins/review",
+      "description": "Concise code review skill. Meant to be searched and hydrated, not preloaded.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["review", "scaffold"]
+    },
+    {
+      "name": "yard",
+      "source": "./plugins/yard",
+      "description": "Local control plane. Search, hydrate, and attach marketplace skills, hooks, and MCP over stdio.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["yard", "mcp", "catalog"]
+    }
+  ]
+}
