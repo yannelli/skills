@@ -1,0 +1,11 @@
+{
+  "name": "Skills Tracker",
+  "install": "npm ci && ([ -f .env ] || cp .env.example .env) && npx prisma migrate deploy && npx prisma generate",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev"
+    }
+  ],
+  "ports": [3000]
+}
