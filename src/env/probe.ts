@@ -216,7 +216,7 @@ function resolveLaunch(entry: McpEntry, projectRoot: string | undefined): Launch
   const expand = (value: string): string => expandVariables(value, vars);
 
   const command = expand(entry.command ?? '');
-  const resolvedCommand = resolveIfRelativePath(command, entry.pluginRoot);
+  const resolvedCommand = resolveCommandPath(command, entry.pluginRoot);
 
   const args = (entry.args ?? []).map(expand);
 
@@ -226,7 +226,7 @@ function resolveLaunch(entry: McpEntry, projectRoot: string | undefined): Launch
   // directory, mirroring how a plugin's other relative paths (skills/, hooks/)
   // are already resolved against its root rather than the project's.
   const cwd = entry.cwd !== undefined ? expand(entry.cwd) : entry.pluginRoot;
-  const resolvedCwd = cwd !== undefined ? resolveIfRelativePath(cwd, entry.pluginRoot) : undefined;
+  const resolvedCwd = cwd !== undefined ? resolveCwdPath(cwd, entry.pluginRoot) : undefined;
 
   return { command: resolvedCommand, args, cwd: resolvedCwd, env };
 }
@@ -238,8 +238,25 @@ function resolveLaunch(entry: McpEntry, projectRoot: string | undefined): Launch
  * already absolute — is resolved, and only when a base to resolve it against
  * is actually known.
  */
-function resolveIfRelativePath(value: string, base: string | undefined): string {
+function resolveCommandPath(value: string, base: string | undefined): string {
   if (base === undefined || value === '' || path.isAbsolute(value) || !/[/\\]/.test(value)) {
+    return value;
+  }
+  return path.resolve(base, value);
+}
+
+/**
+ * Unlike a command, `cwd` is never looked up on `PATH` — there is no bare
+ * word/relative-path distinction to make, so even `.` (a plugin manifest's
+ * usual way of saying "my own directory") must resolve against the plugin
+ * root. Reusing {@link resolveCommandPath}'s "only if it already looks like a
+ * path" rule here was the actual bug behind the report's `dataAnalyticsWidgets`
+ * and `yard` MCP probe failures: it left a bare `.` — no slash in it —
+ * untouched, so Node resolved it against wherever the Yard process happened
+ * to be running from instead of the plugin that declared it.
+ */
+function resolveCwdPath(value: string, base: string | undefined): string {
+  if (base === undefined || value === '' || path.isAbsolute(value)) {
     return value;
   }
   return path.resolve(base, value);
