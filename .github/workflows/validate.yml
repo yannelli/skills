@@ -19,3 +19,26 @@ jobs:
       - run: npm run validate
       - run: npm test
       - run: npm run typecheck
+
+      # plugins/yard/dist and plugins/yard/public are committed, because that is
+      # what clients install. A build that changes them means the committed
+      # artefacts are stale and the installed plugin does not match the source.
+      - name: committed build output is up to date
+        run: |
+          if ! git diff --quiet -- plugins/yard/dist plugins/yard/public; then
+            echo "::error::plugins/yard/dist or plugins/yard/public is stale. Run 'npm run build' and commit the result."
+            git diff --stat -- plugins/yard/dist plugins/yard/public
+            exit 1
+          fi
+
+      # A bundle that throws on startup passes every test above, because the
+      # tests import the source rather than the bundle clients actually run.
+      - name: bundled cli runs
+        run: |
+          node plugins/yard/dist/cli.js --help > /dev/null
+          node plugins/yard/dist/cli.js scan --json | node -e 'JSON.parse(require("fs").readFileSync(0,"utf8"))'
+          # doctor exits 1 when it finds an error, which is its contract, so
+          # only its output is asserted here.
+          node plugins/yard/dist/cli.js doctor --json > doctor.json || true
+          node -e 'JSON.parse(require("fs").readFileSync("doctor.json","utf8"))'
+          rm doctor.json

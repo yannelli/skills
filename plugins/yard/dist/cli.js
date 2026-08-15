@@ -2346,15 +2346,19 @@ async function runAdapt(options) {
 }
 async function runAdaptCommand(args) {
   rejectUnknownFlags(args, [...GLOBAL_FLAGS, "name", "dest", "register", "no-register"]);
+  const usage = "usage: yard adapt <path> [--name=] [--dest=] [--register|--no-register]";
   const [source, extra] = args.positionals;
   if (extra !== void 0) {
-    throw new CliError(`unexpected argument "${extra}" \u2014 ${ADAPT_USAGE}`);
+    throw new CliError(`unexpected argument "${extra}" \u2014 ${usage}`);
+  }
+  if (!source) {
+    throw new CliError(usage);
   }
   const name = flagString(args, "name");
   const dest = flagString(args, "dest");
   const register2 = args.flags.has("register") ? true : args.flags.has("no-register") ? false : void 0;
   return runAdapt({
-    source: source ?? "",
+    source,
     ...name ? { name } : {},
     ...dest ? { dest } : {},
     ...register2 !== void 0 ? { register: register2 } : {}
@@ -5161,7 +5165,7 @@ function summarise(found) {
   for (const item of found) {
     counts[item.severity] += 1;
   }
-  const parts = ["error", "warning", "info"].filter((severity) => counts[severity] > 0).map((severity) => plural(counts[severity], severity));
+  const parts = ["error", "warning", "info"].filter((severity) => counts[severity] > 0).map((severity) => plural(counts[severity], severity, severity === "info" ? "info" : `${severity}s`));
   return parts.join(", ");
 }
 function severityLabel(severity, style) {
@@ -5368,7 +5372,7 @@ function reportAction(result, options) {
     console.log(style.dim("dry run, nothing was written"));
   }
   console.log(result.detail);
-  if (result.file) {
+  if (result.file && !result.detail.includes(result.file)) {
     console.log(style.dim(`file    ${shortenPath(result.file, options.projectRoot)}`));
   }
   if (result.backup) {
@@ -30824,6 +30828,21 @@ var ENV_KINDS = ["skills", "plugins", "mcp", "hooks", "agents", "commands", "mem
 function isEnvKind(value) {
   return ENV_KINDS.includes(value);
 }
+var KIND_ALIASES = {
+  skill: "skills",
+  plugin: "plugins",
+  mcpServers: "mcp",
+  hook: "hooks",
+  agent: "agents",
+  command: "commands",
+  memories: "memory"
+};
+function toEnvKind(value) {
+  if (isEnvKind(value)) {
+    return value;
+  }
+  return KIND_ALIASES[value];
+}
 function countInventory(inventory) {
   return {
     skills: inventory.skills.length,
@@ -31725,10 +31744,11 @@ function kindParam(value) {
   if (!value) {
     return void 0;
   }
-  if (!isEnvKind(value)) {
+  const kind = toEnvKind(value);
+  if (!kind) {
     return badRequest(`kind must be one of ${ENV_KINDS.join(", ")}`);
   }
-  return value;
+  return kind;
 }
 function probeParam(value) {
   if (value === void 0 || value === "" || value === "0" || value === "false") {
@@ -31946,9 +31966,18 @@ async function runServe(options = {}) {
   if (existsSync3(REPO_ROOT)) {
     watch(REPO_ROOT, { recursive: false }, () => catalog.invalidate());
   }
-  serve({ fetch: app.fetch, hostname: "127.0.0.1", port: options.port ?? DEFAULT_PORT }, (info) => {
+  const port = options.port ?? DEFAULT_PORT;
+  const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
     console.error(`yard  http://127.0.0.1:${info.port}`);
     console.error(`mcp   http://127.0.0.1:${info.port}/mcp`);
+  });
+  server.on("error", (error2) => {
+    if (error2.code === "EADDRINUSE") {
+      process.stderr.write(`yard: port ${port} is already in use \u2014 pass --port=<port>
+`);
+      process.exit(1);
+    }
+    throw error2;
   });
   const shutdown = async () => {
     await close();
@@ -32001,7 +32030,6 @@ var USAGE2 = `yard \u2014 one control plane for claude code, codex, and cursor
 usage: yard <command> [options]
 
   scan                          what every client will load: counts, then the inventory
-    --client=claude|codex|cursor
     --kind=skill|plugin|mcp|hook|agent|command|memory
   context [--probe]             what your setup costs in context, per turn, and what to turn off
   doctor [--probe]              what is quietly broken. exits 1 when anything is an error
@@ -32017,10 +32045,10 @@ usage: yard <command> [options]
 options everywhere:
   --json                        machine output, no colour
   --project=<path>              project to scan, defaults to the working directory
+  --client=claude|codex|cursor  one client only, and the one to write to when a name is ambiguous
 
 mutating commands also take:
   --dry-run                     print what would change, write nothing
-  --client=<client>             which client to write to, when a name is ambiguous
   --scope=user|project|local    which settings file to write, defaults to user
 
 legacy flags, unchanged:
@@ -32108,7 +32136,9 @@ main().then(
     process.exitCode = code;
   },
   (error2) => {
-    process.stderr.write(`yard: ${error2 instanceof Error ? error2.message : String(error2)}
+    const message = error2 instanceof Error ? error2.message : String(error2);
+    process.stderr.write(message.startsWith("usage:") ? `${message}
+` : `yard: ${message}
 `);
     process.exitCode = 1;
   }
