@@ -1,7 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createMcpHonoApp } from '@modelcontextprotocol/hono';
+import { localhostHostValidation, localhostOriginValidation } from '@modelcontextprotocol/hono';
 import { createMcpHandler } from '@modelcontextprotocol/server';
+import { Hono } from 'hono';
 import { assertInsideRoot, indexOf, type Catalog } from './catalog.js';
 import { createYardServer } from './mcp.js';
 import { PUBLIC_DIR } from './paths.js';
@@ -12,7 +13,9 @@ import { ARTIFACT_KINDS, type ArtifactKind } from './types.js';
 
 export function createYardApp(catalog: Catalog, session: Session) {
   const mcp = createMcpHandler(() => createYardServer(catalog, session));
-  const app = createMcpHonoApp({ host: '127.0.0.1' });
+  const app = new Hono();
+  app.use('*', localhostHostValidation());
+  app.use('*', localhostOriginValidation());
 
   app.get('/api/health', (c) => c.json({ ok: true, name: 'yard' }));
 

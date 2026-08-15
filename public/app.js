@@ -7,14 +7,26 @@ const state = {
   artifact: null
 };
 
-async function api(path, options) {
+async function api(path, options = {}) {
+  const headers = { ...options.headers };
+  if (options.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
   const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options
+    ...options,
+    headers
   });
-  const data = await res.json();
+  const text = await res.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(text);
+    }
+  }
   if (!res.ok) {
-    throw new Error(data.error ?? res.statusText);
+    throw new Error(data.error ?? (text || res.statusText));
   }
   return data;
 }

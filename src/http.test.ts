@@ -16,7 +16,9 @@ test('health and catalog endpoints serve the marketplace', async () => {
     const headers = { Host: '127.0.0.1' };
     const health = await app.request('/api/health', { headers });
     assert.equal(health.status, 200);
-    const catalogRes = await app.request('/api/catalog', { headers });
+    const catalogRes = await app.request('/api/catalog', {
+      headers: { ...headers, 'Content-Type': 'application/json' }
+    });
     const body = (await catalogRes.json()) as { artifacts: Array<{ id: string }> };
     assert.ok(body.artifacts.some((item) => item.id === 'hello/skill/hello'));
     const page = await app.request('/', { headers });
