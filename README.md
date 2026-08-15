@@ -1,75 +1,64 @@
-# Skills Tracker
+# yannelli/skills
 
-A small full-stack app for logging the skills you are learning and how confident
-you feel about each one. Built with **Next.js (App Router)**, **TypeScript**,
-**Prisma**, and **SQLite**.
+Claude Code marketplace of **agent plugins**. Each plugin ships one or more
+subagents under `agents/` and is listed in `.claude-plugin/marketplace.json`.
 
-## Features
+The catalog follows the [Claude Code marketplace schema](https://code.claude.com/docs/en/plugin-marketplaces)
+and each plugin follows the [plugin manifest schema](https://code.claude.com/docs/en/plugins-reference#plugin-manifest-schema).
 
-- Add a skill with a category, a 1–5 confidence rating, and optional notes.
-- See all skills sorted by confidence, with an inline rating meter.
-- Remove skills you no longer want to track.
-- Data persists in a local SQLite database via Prisma.
+## Install
 
-## Tech stack
+In Claude Code:
 
-| Layer     | Choice                          |
-| --------- | ------------------------------- |
-| Framework | Next.js 15 (App Router)         |
-| Language  | TypeScript                      |
-| Data      | Prisma ORM + SQLite             |
-| API       | Next.js Route Handlers          |
-| Styling   | Hand-written CSS (no framework) |
-
-## Getting started
-
-```bash
-# 1. Install dependencies
-npm install
-
-# 2. Create your local env file and database
-cp .env.example .env
-npx prisma migrate deploy
-npx prisma generate
-
-# 3. (Optional) seed sample data
-npm run db:seed
-
-# 4. Start the dev server
-npm run dev
+```text
+/plugin marketplace add yannelli/skills
+/plugin install code-review@yannelli-skills
 ```
 
-Then open http://localhost:3000.
+Then invoke an agent with `@code-review:code-reviewer` (or the matching scoped
+name for another plugin).
 
-## Useful scripts
+## Plugins
 
-| Command              | What it does                                  |
-| -------------------- | --------------------------------------------- |
-| `npm run dev`        | Start the Next.js dev server on port 3000     |
-| `npm run build`      | Production build                              |
-| `npm run lint`       | Lint with `eslint-config-next`                |
-| `npm run typecheck`  | Type-check with `tsc --noEmit`                |
-| `npm run db:migrate` | Apply committed Prisma migrations             |
-| `npm run db:seed`    | Insert a few sample skills                    |
+| Plugin | Agent | What it does |
+| --- | --- | --- |
+| `code-review` | `code-reviewer` | Reviews a diff for bugs, security issues, and convention drift |
+| `debugger` | `debugger` | Isolates a failing test or stack trace and reports a root cause |
+| `test-writer` | `test-writer` | Writes focused tests using the repo's existing runner |
 
-## API
+## Layout
 
-| Method   | Path               | Description        |
-| -------- | ------------------ | ------------------ |
-| `GET`    | `/api/skills`      | List all skills    |
-| `POST`   | `/api/skills`      | Create a skill     |
-| `DELETE` | `/api/skills/:id`  | Delete a skill     |
-
-Example:
-
-```bash
-curl -s -X POST http://localhost:3000/api/skills \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Rust","category":"Languages","proficiency":2,"notes":"Learning ownership"}'
+```text
+.claude-plugin/marketplace.json   # marketplace catalog
+plugins/
+  <plugin>/
+    .claude-plugin/plugin.json    # plugin manifest
+    agents/<agent>.md             # subagent (YAML frontmatter + prompt)
+schemas/                          # vendored SchemaStore copies
+scripts/validate-marketplace.py   # schema + agent frontmatter checks
 ```
 
-## Cloud Agent environment
+Relative plugin sources live in this repository so a git checkout of the
+marketplace is enough. Do not point `source` at a URL unless the plugin is
+published from another repo.
 
-`.cursor/environment.json` configures the Cursor Cloud Agent environment:
-`install` restores dependencies, creates `.env`, applies migrations, and
-generates the Prisma client; the `dev` terminal runs the app on port 3000.
+## Validate
+
+```bash
+python3 -m pip install --user jsonschema
+python3 scripts/validate-marketplace.py
+```
+
+The script checks:
+
+- `marketplace.json` against `schemas/claude-code-marketplace.json`
+- each `plugin.json` against `schemas/claude-code-plugin-manifest.json`
+- that every listed plugin exists and ships at least one agent
+- that each agent file has `name` and `description` frontmatter
+
+## Add an agent plugin
+
+1. Create `plugins/<name>/.claude-plugin/plugin.json` with a unique `name`.
+2. Add `plugins/<name>/agents/<agent>.md` with `name` and `description` in the frontmatter.
+3. Append a `plugins[]` entry in `.claude-plugin/marketplace.json` with `"source": "./plugins/<name>"`.
+4. Run `python3 scripts/validate-marketplace.py`.

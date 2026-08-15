@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "yannelli-skills",
+  "version": "0.1.0",
+  "description": "Claude Code marketplace of agent plugins.",
+  "owner": {
+    "name": "Ryan Yannelli",
+    "url": "https://github.com/yannelli"
+  },
+  "plugins": [
+    {
+      "name": "code-review",
+      "source": "./plugins/code-review",
+      "description": "Subagent that reviews diffs for bugs, security issues, and project-convention drift.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Ryan Yannelli",
+        "url": "https://github.com/yannelli"
+      },
+      "category": "development",
+      "tags": ["agents", "code-review"],
+      "license": "MIT",
+      "keywords": ["code-review", "subagent"]
+    },
+    {
+      "name": "debugger",
+      "source": "./plugins/debugger",
+      "description": "Subagent that isolates a failing test or stack trace and reports a root cause with evidence.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Ryan Yannelli",
+        "url": "https://github.com/yannelli"
+      },
+      "category": "development",
+      "tags": ["agents", "debugging"],
+      "license": "MIT",
+      "keywords": ["debugger", "subagent"]
+    },
+    {
+      "name": "test-writer",
+      "source": "./plugins/test-writer",
+      "description": "Subagent that writes focused tests for a changed behavior using the repo's existing test runner.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Ryan Yannelli",
+        "url": "https://github.com/yannelli"
+      },
+      "category": "development",
+      "tags": ["agents", "testing"],
+      "license": "MIT",
+      "keywords": ["testing", "subagent"]
+    }
+  ]
+}

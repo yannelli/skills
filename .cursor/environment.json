@@ -1,11 +1,4 @@
 {
-  "name": "Skills Tracker",
-  "install": "npm ci && ([ -f .env ] || cp .env.example .env) && npx prisma migrate deploy && npx prisma generate",
-  "terminals": [
-    {
-      "name": "dev",
-      "command": "npm run dev"
-    }
-  ],
-  "ports": [3000]
+  "name": "Yannelli Skills Marketplace",
+  "install": "python3 -m pip install --user --quiet jsonschema && python3 scripts/validate-marketplace.py"
 }
