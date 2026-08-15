@@ -269,9 +269,9 @@ export function ContextTab({ resource, probe, onMeasure, onChanged }: ContextTab
                           <span className="block truncate font-medium" title={line.id}>
                             {line.label}
                           </span>
-                          {line.detail ? (
+                          {detailOf(line) ? (
                             <span className="block truncate text-xs text-muted-foreground">
-                              {line.detail}
+                              {detailOf(line)}
                             </span>
                           ) : null}
                         </TableCell>
@@ -322,6 +322,14 @@ export function ContextTab({ resource, probe, onMeasure, onChanged }: ContextTab
       </Card>
     </div>
   )
+}
+
+/** The layer writes its details for a terminal; --probe is a button here. */
+function detailOf(line: ContextLine): string | undefined {
+  if (line.detail?.includes('--probe')) {
+    return 'no tool list has been read from this server'
+  }
+  return line.detail
 }
 
 type Basis = {

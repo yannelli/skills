@@ -175,7 +175,11 @@ export type ActionResult = {
   detail: string;
 };
 
-/** The `kind` vocabulary /api/env/inventory accepts. Mirrors ENV_KINDS in src/env-api.ts. */
+/**
+ * The canonical `kind` vocabulary of /api/env/inventory, mirroring ENV_KINDS in
+ * src/env-api.ts. That endpoint also accepts the singular aliases; this sends
+ * the canonical form.
+ */
 export const ENV_KINDS = [
   'skills',
   'plugins',
