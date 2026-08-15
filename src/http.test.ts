@@ -16,6 +16,15 @@ test('health and catalog endpoints serve the marketplace', async () => {
     const headers = { Host: '127.0.0.1' };
     const health = await app.request('/api/health', { headers });
     assert.equal(health.status, 200);
+    const healthBody = (await health.json()) as { embeddings?: { available?: boolean; enabled?: boolean } };
+    assert.equal(healthBody.embeddings?.available, false);
+    assert.equal(healthBody.embeddings?.enabled, false);
+    const blocked = await app.request('/api/session/embeddings', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true })
+    });
+    assert.equal(blocked.status, 400);
     const catalogRes = await app.request('/api/catalog', {
       headers: { ...headers, 'Content-Type': 'application/json' }
     });

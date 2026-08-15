@@ -57,6 +57,19 @@ On: `catalog_search` still returns the index. `catalog_get` stays closed until `
 
 Yard session IDs are not client hook stores or client MCP stores.
 
+### Embeddings search
+
+Off by default. Lexical search always works.
+
+On: catalog search embeds the query and artifact text through OpenRouter and ranks by cosine similarity, blended with the lexical score. Vectors are cached in `.yard/embeddings/` keyed by model and content hash. Unchanged files are not re-sent.
+
+```bash
+export OPENROUTER_API_KEY=...
+export YARD_EMBEDDINGS_MODEL=voyageai/voyage-4-lite   # default
+```
+
+Then enable Embeddings in the UI, or `session_set_embeddings`. Any OpenRouter embedding model id works. `voyageai/voyage-4-lite` is the default.
+
 ## Layout
 
 ```text

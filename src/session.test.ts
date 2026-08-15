@@ -48,6 +48,16 @@ test('hydrating yard activates that plugin’s MCP', async () => {
   });
 });
 
+test('embeddings stay off until enabled', async () => {
+  await withSession(async (session) => {
+    const before = await session.view();
+    assert.equal(before.embeddingsEnabled, false);
+    assert.equal(before.embeddingsModel, 'voyageai/voyage-4-lite');
+    const after = await session.setEmbeddings({ enabled: true, model: 'voyageai/voyage-4-lite' });
+    assert.equal(after.embeddingsEnabled, true);
+  });
+});
+
 test('pins stay available in dynamic mode', async () => {
   await withSession(async (session) => {
     await session.pin(['hello/skill/hello']);

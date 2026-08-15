@@ -15,3 +15,5 @@
 Names are kebab-case. Marketplace id is `yannelli-skills`.
 
 The UI lives in `web/` (Vite + latest shadcn). `npm run build:web` writes `plugins/yard/public`.
+
+Embeddings search is off until `OPENROUTER_API_KEY` is set and Embeddings is enabled. Vectors live in `.yard/embeddings/` and are gitignored.

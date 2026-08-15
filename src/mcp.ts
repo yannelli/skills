@@ -2,13 +2,18 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server';
 import * as z from 'zod';
 import type { Catalog } from './catalog.js';
 import { indexOf } from './catalog.js';
-import { searchArtifacts } from './search.js';
+import { Embeddings } from './embed.js';
+import { searchCatalog } from './search.js';
 import type { Session } from './session.js';
 import { ARTIFACT_KINDS } from './types.js';
 
 const KindSchema = z.enum(ARTIFACT_KINDS);
 
-export function createYardServer(catalog: Catalog, session: Session): McpServer {
+export function createYardServer(
+  catalog: Catalog,
+  session: Session,
+  embeddings: Embeddings = Embeddings.none()
+): McpServer {
   const server = new McpServer({
     name: 'yard',
     version: '0.1.0'
@@ -19,7 +24,7 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
     {
       title: 'Search catalog',
       description:
-        'Search marketplace skills, rules, agents, commands, hooks, and MCP servers. Returns metadata only. In dynamic mode, hydrate an id to load its body and activate that plugin’s hooks and MCP.',
+        'Search marketplace skills, rules, agents, commands, hooks, and MCP servers. Returns metadata only. Uses OpenRouter embeddings when embeddings search is enabled. In dynamic mode, hydrate an id to load its body and activate that plugin’s hooks and MCP.',
       inputSchema: z.object({
         query: z.string().describe('Free-text query. Empty lists the catalog.'),
         kinds: z.array(KindSchema).optional(),
@@ -30,13 +35,22 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
     },
     async ({ query, kinds, plugin, limit }) => {
       const { artifacts } = await catalog.load();
-      const hits = searchArtifacts(artifacts, {
-        query,
-        ...(kinds ? { kinds } : {}),
-        ...(plugin ? { plugin } : {}),
-        ...(limit !== undefined ? { limit } : {})
-      }).map(indexOf);
-      return textResult({ hits, count: hits.length });
+      const view = await session.view();
+      const semantic =
+        view.embeddingsEnabled && embeddings.available()
+          ? { embeddings, model: view.embeddingsModel }
+          : undefined;
+      const { hits, mode } = await searchCatalog(
+        artifacts,
+        {
+          query,
+          ...(kinds ? { kinds } : {}),
+          ...(plugin ? { plugin } : {}),
+          ...(limit !== undefined ? { limit } : {})
+        },
+        semantic
+      );
+      return textResult({ hits: hits.map(indexOf), count: hits.length, mode, model: view.embeddingsModel });
     }
   );
 
@@ -69,7 +83,8 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
     'session_status',
     {
       title: 'Session status',
-      description: 'Dynamic mode, pins, hydrated artifacts, active hooks, live MCP, and the currently available id set.',
+      description:
+        'Dynamic mode, embeddings search, pins, hydrated artifacts, active hooks, live MCP, and the currently available id set.',
       annotations: { readOnlyHint: true, idempotentHint: true }
     },
     async () => textResult(await session.view())
@@ -86,6 +101,25 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
       })
     },
     async ({ enabled }) => textResult(await session.setDynamicMode(enabled))
+  );
+
+  server.registerTool(
+    'session_set_embeddings',
+    {
+      title: 'Set embeddings search',
+      description:
+        'Enable semantic catalog search through OpenRouter. Default model is voyageai/voyage-4-lite. Requires OPENROUTER_API_KEY. Vectors are cached under .yard/embeddings.',
+      inputSchema: z.object({
+        enabled: z.boolean(),
+        model: z.string().optional().describe('OpenRouter embedding model id, e.g. voyageai/voyage-4-lite')
+      })
+    },
+    async ({ enabled, model }) => {
+      if (enabled && !embeddings.available()) {
+        throw new Error('OPENROUTER_API_KEY is not set');
+      }
+      return textResult(await session.setEmbeddings({ enabled, ...(model ? { model } : {}) }));
+    }
   );
 
   server.registerTool(
