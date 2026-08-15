@@ -24,9 +24,12 @@ import {
   CLIENTS,
   SCOPES,
   SKILL_VISIBILITIES,
+  mcpActionBlocked,
+  pluginActionBlocked,
   setMcpEnabled,
   setPluginEnabled,
   setSkillVisibility,
+  skillActionBlocked,
   type Client,
   type Inventory,
   type Scope,
@@ -46,9 +49,9 @@ const ROW_KINDS = ['skill', 'plugin', 'mcp', 'hook', 'agent', 'command', 'memory
 type RowKind = (typeof ROW_KINDS)[number]
 
 type Control =
-  | { type: 'skill'; skill: string; visibility: SkillVisibility; blocked?: string }
-  | { type: 'plugin'; plugin: string; enabled: boolean; blocked?: string }
-  | { type: 'mcp'; server: string; enabled: boolean; blocked?: string }
+  | { type: 'skill'; id: string; skill: string; visibility: SkillVisibility; blocked?: string }
+  | { type: 'plugin'; id: string; plugin: string; enabled: boolean; blocked?: string }
+  | { type: 'mcp'; id: string; server: string; enabled: boolean; blocked?: string }
 
 type Row = {
   key: string
@@ -298,7 +301,14 @@ function RowControl({
           value={control.visibility}
           disabled={busy || Boolean(control.blocked)}
           onValueChange={(next) => {
-            action.run(row.key, () => setSkillVisibility(control.skill, next as SkillVisibility, row.client))
+            action.run(row.key, () =>
+              setSkillVisibility({
+                id: control.id,
+                skill: control.skill,
+                visibility: next as SkillVisibility,
+                client: row.client,
+              })
+            )
           }}
         >
           <SelectTrigger className="w-44">
@@ -327,8 +337,8 @@ function RowControl({
         onCheckedChange={(next) => {
           action.run(row.key, () =>
             control.type === 'plugin'
-              ? setPluginEnabled(control.plugin, next, row.client)
-              : setMcpEnabled(control.server, next, row.client)
+              ? setPluginEnabled({ id: control.id, plugin: control.plugin, enabled: next, client: row.client })
+              : setMcpEnabled({ id: control.id, server: control.server, enabled: next, client: row.client })
           )
         }}
       />
@@ -352,13 +362,10 @@ function buildRows(inventory: Inventory): Row[] {
       ...(skill.visibilitySource ? { stateSource: skill.visibilitySource } : {}),
       control: {
         type: 'skill',
+        id: skill.id,
         skill: skill.qualifiedName,
         visibility: skill.visibility,
-        // Cursor stores no visibility anywhere; the only way to hide a skill is
-        // to move its directory by hand.
-        ...(skill.client === 'cursor'
-          ? { blocked: 'cursor has no skill visibility setting — move the directory by hand' }
-          : {}),
+        ...(skillActionBlocked(skill) ? { blocked: skillActionBlocked(skill) } : {}),
       },
     })
   }
@@ -378,11 +385,10 @@ function buildRows(inventory: Inventory): Row[] {
       ...(plugin.enabledSource ? { stateSource: plugin.enabledSource } : {}),
       control: {
         type: 'plugin',
+        id: plugin.id,
         plugin: plugin.qualifiedName,
         enabled: plugin.enabled,
-        ...(plugin.client === 'claude'
-          ? {}
-          : { blocked: 'only Claude Code stores plugin enablement in settings' }),
+        ...(pluginActionBlocked(plugin) ? { blocked: pluginActionBlocked(plugin) } : {}),
       },
     })
   }
@@ -400,11 +406,10 @@ function buildRows(inventory: Inventory): Row[] {
       ...(server.enabledSource ? { stateSource: server.enabledSource } : {}),
       control: {
         type: 'mcp',
+        id: server.id,
         server: server.name,
         enabled: server.enabled,
-        ...(server.client === 'codex'
-          ? { blocked: 'codex owns config.toml — use `codex mcp add/remove` so its formatting survives' }
-          : {}),
+        ...(mcpActionBlocked(server) ? { blocked: mcpActionBlocked(server) } : {}),
       },
     })
   }
