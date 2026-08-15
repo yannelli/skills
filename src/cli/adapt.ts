@@ -30,16 +30,20 @@ export async function runAdapt(options: AdaptOptions): Promise<number> {
 
 export async function runAdaptCommand(args: Args): Promise<number> {
   rejectUnknownFlags(args, [...GLOBAL_FLAGS, 'name', 'dest', 'register', 'no-register']);
+  const usage = 'usage: yard adapt <path> [--name=] [--dest=] [--register|--no-register]';
   const [source, extra] = args.positionals;
   if (extra !== undefined) {
-    throw new CliError(`unexpected argument "${extra}" — ${ADAPT_USAGE}`);
+    throw new CliError(`unexpected argument "${extra}" — ${usage}`);
+  }
+  if (!source) {
+    throw new CliError(usage);
   }
   const name = flagString(args, 'name');
   const dest = flagString(args, 'dest');
   const register = args.flags.has('register') ? true : args.flags.has('no-register') ? false : undefined;
 
   return runAdapt({
-    source: source ?? '',
+    source,
     ...(name ? { name } : {}),
     ...(dest ? { dest } : {}),
     ...(register !== undefined ? { register } : {})

@@ -50,7 +50,8 @@ export async function runDoctor(args: Args): Promise<number> {
     if (item.remedy) {
       rows.push(['', '', '', style.dim(truncate(`fix: ${item.remedy}`, DETAIL_WIDTH))]);
     }
-    if (item.file) {
+    // Several summaries name the file already; repeating it wastes a line.
+    if (item.file && !item.summary.includes(item.file)) {
       rows.push(['', '', '', style.dim(truncate(shortenPath(item.file, inventory.projectRoot), DETAIL_WIDTH))]);
     }
   }
@@ -74,7 +75,7 @@ function summarise(found: Diagnosis[]): string {
   }
   const parts = (['error', 'warning', 'info'] as const)
     .filter((severity) => counts[severity] > 0)
-    .map((severity) => plural(counts[severity], severity));
+    .map((severity) => plural(counts[severity], severity, severity === 'info' ? 'info' : `${severity}s`));
   return parts.join(', ');
 }
 

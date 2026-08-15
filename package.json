@@ -8,13 +8,16 @@
   "engines": {
     "node": ">=22"
   },
+  "bin": {
+    "yard": "plugins/yard/dist/cli.js"
+  },
   "scripts": {
     "start": "tsx src/cli.ts serve",
     "yard": "tsx src/cli.ts",
     "adapt": "tsx src/cli.ts --adapt",
     "sync-mcp": "tsx src/cli.ts --emit-mcp",
     "build": "npm run build:server && npm run build:web",
-    "build:server": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=plugins/yard/dist/cli.js --legal-comments=none",
+    "build:server": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=plugins/yard/dist/cli.js --legal-comments=none --banner:js=\"#!/usr/bin/env node\"",
     "build:web": "npm --prefix web run build",
     "dev:web": "npm --prefix web run dev",
     "validate": "node scripts/validate.mjs",

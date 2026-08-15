@@ -1,4 +1,10 @@
-import { buildContextReport, topOffenders, type ContextKind, type ContextReport } from '../env/context.js';
+import {
+  buildContextReport,
+  topOffenders,
+  type ContextKind,
+  type ContextLine,
+  type ContextReport
+} from '../env/context.js';
 import { scanEnvironment } from '../env/inventory.js';
 import { formatTokens } from '../env/tokens.js';
 import { commonOptions, flagBool, flagNumber, GLOBAL_FLAGS, rejectUnknownFlags, type Args } from './args.js';
@@ -18,17 +24,21 @@ export async function runContext(args: Args): Promise<number> {
     ...(probeTimeoutMs !== undefined ? { probeTimeoutMs } : {})
   });
 
+  const offenders: ContextLine[] = topOffenders(report, 10).map((line) => ({
+    ...line,
+    ...(line.remedy ? { remedy: qualify(line.remedy, line.client, report) } : {})
+  }));
+
   if (options.json) {
-    console.log(renderJson({ ...report, offenders: topOffenders(report, 10) }));
+    console.log(renderJson({ ...report, offenders }));
     return 0;
   }
 
-  const style = createStyle(colorEnabled(options.json));
-  printLedger(report, style);
+  printLedger(report, offenders, createStyle(colorEnabled(options.json)));
   return 0;
 }
 
-function printLedger(report: ContextReport, style: Style): void {
+function printLedger(report: ContextReport, offenders: ContextLine[], style: Style): void {
   const head = (value: string): string => style.dim(value);
 
   if (!report.lines.length) {
@@ -82,7 +92,6 @@ function printLedger(report: ContextReport, style: Style): void {
   );
   console.log('');
 
-  const offenders = topOffenders(report, 10);
   if (offenders.length) {
     console.log(
       renderTable(
@@ -99,7 +108,7 @@ function printLedger(report: ContextReport, style: Style): void {
           line.kind,
           line.client,
           formatTokens(line.tokens),
-          line.measured ? (line.detail ?? 'measured') : style.yellow(line.detail ?? 'estimated'),
+          line.measured ? (line.detail ?? '') : style.yellow(line.detail ?? 'estimated'),
           line.remedy ?? ''
         ]),
         { headStyle: head }
@@ -115,4 +124,14 @@ function printLedger(report: ContextReport, style: Style): void {
   const next = offenders[0]?.remedy;
   console.log('');
   console.log(next ? `next: ${next}` : 'next: yard doctor');
+}
+
+/**
+ * The same server name is often configured in two clients. A bare
+ * `yard mcp disable context7` would then refuse as ambiguous, so the printed
+ * command says which client it means.
+ */
+function qualify(remedy: string, client: string, report: ContextReport): string {
+  const sharing = new Set(report.lines.filter((line) => line.remedy === remedy).map((line) => line.client));
+  return sharing.size > 1 ? `${remedy} --client=${client}` : remedy;
 }

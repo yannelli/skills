@@ -1,8 +1,5617 @@
+#!/usr/bin/env node
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+
+// src/frontmatter.ts
+function parseFrontmatter(raw2) {
+  const match2 = FENCE.exec(raw2);
+  if (!match2) {
+    return { data: {}, body: raw2 };
+  }
+  const data = {};
+  let pendingKey;
+  let pendingLines = [];
+  const flush = () => {
+    if (!pendingKey) {
+      return;
+    }
+    data[pendingKey] = pendingLines.join(" ").replace(/\s+/g, " ").trim();
+    pendingKey = void 0;
+    pendingLines = [];
+  };
+  for (const line of match2[1]?.split(/\r?\n/) ?? []) {
+    const keyed = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    if (keyed) {
+      flush();
+      const key = keyed[1];
+      const value = keyed[2] ?? "";
+      if (!key) {
+        continue;
+      }
+      if (value === ">" || value === "|") {
+        pendingKey = key;
+        pendingLines = [];
+        continue;
+      }
+      data[key] = stripQuotes(value);
+      continue;
+    }
+    if (pendingKey && /^\s+/.test(line)) {
+      pendingLines.push(line.trim());
+      continue;
+    }
+  }
+  flush();
+  return { data, body: raw2.slice(match2[0].length) };
+}
+function stripQuotes(value) {
+  if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+var FENCE;
+var init_frontmatter = __esm({
+  "src/frontmatter.ts"() {
+    "use strict";
+    FENCE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+  }
+});
+
+// src/env/client-paths.ts
+import { homedir } from "node:os";
+import path6 from "node:path";
+function home() {
+  return process.env.YARD_HOME ? path6.resolve(process.env.YARD_HOME) : homedir();
+}
+function claudePaths(projectRoot) {
+  const h = home();
+  const dir = path6.join(h, ".claude");
+  const project = path6.join(projectRoot, ".claude");
+  return {
+    dir,
+    /** Global, non-settings config: numStartups, enableAllProjectMcpServers, ... */
+    globalConfig: path6.join(h, ".claude.json"),
+    userSettings: path6.join(dir, "settings.json"),
+    userLocalSettings: path6.join(dir, "settings.local.json"),
+    projectSettings: path6.join(project, "settings.json"),
+    projectLocalSettings: path6.join(project, "settings.local.json"),
+    managedSettings: managedClaudeSettings(),
+    userSkills: path6.join(dir, "skills"),
+    userSkillsDisabled: path6.join(dir, "skills.disabled"),
+    projectSkills: path6.join(project, "skills"),
+    userAgents: path6.join(dir, "agents"),
+    projectAgents: path6.join(project, "agents"),
+    userCommands: path6.join(dir, "commands"),
+    projectCommands: path6.join(project, "commands"),
+    userRules: path6.join(dir, "rules"),
+    userMemory: path6.join(dir, "CLAUDE.md"),
+    projectMemory: path6.join(projectRoot, "CLAUDE.md"),
+    projectMcp: path6.join(projectRoot, ".mcp.json"),
+    pluginsDir: path6.join(dir, "plugins"),
+    knownMarketplaces: path6.join(dir, "plugins", "known_marketplaces.json"),
+    installedPlugins: path6.join(dir, "plugins", "installed_plugins.json"),
+    marketplacesDir: path6.join(dir, "plugins", "marketplaces"),
+    pluginCacheDir: path6.join(dir, "plugins", "cache")
+  };
+}
+function managedClaudeSettings() {
+  if (process.platform === "darwin") {
+    return "/Library/Application Support/ClaudeCode/managed-settings.json";
+  }
+  if (process.platform === "win32") {
+    return path6.join("C:\\", "ProgramData", "ClaudeCode", "managed-settings.json");
+  }
+  return "/etc/claude-code/managed-settings.json";
+}
+function codexPaths(projectRoot) {
+  const dir = path6.join(home(), ".codex");
+  return {
+    dir,
+    config: path6.join(dir, "config.toml"),
+    hooks: path6.join(dir, "hooks.json"),
+    userSkills: path6.join(dir, "skills"),
+    userSkillsDisabled: path6.join(dir, "skills.disabled"),
+    pluginsDir: path6.join(dir, "plugins"),
+    pluginCacheDir: path6.join(dir, "plugins", "cache"),
+    userMemory: path6.join(dir, "AGENTS.md"),
+    projectMemory: path6.join(projectRoot, "AGENTS.md")
+  };
+}
+function cursorPaths(projectRoot) {
+  const dir = path6.join(home(), ".cursor");
+  const project = path6.join(projectRoot, ".cursor");
+  return {
+    dir,
+    cliConfig: path6.join(dir, "cli-config.json"),
+    userMcp: path6.join(dir, "mcp.json"),
+    projectMcp: path6.join(project, "mcp.json"),
+    userHooks: path6.join(dir, "hooks.json"),
+    projectHooks: path6.join(project, "hooks.json"),
+    userSkills: path6.join(dir, "skills"),
+    projectSkills: path6.join(project, "skills"),
+    /** Cursor's own bundled skills. Reserved — never write here. */
+    builtinSkills: path6.join(dir, "skills-cursor"),
+    userRules: path6.join(dir, "rules"),
+    projectRules: path6.join(project, "rules"),
+    userCommands: path6.join(dir, "commands"),
+    projectCommands: path6.join(project, "commands"),
+    pluginCacheDir: path6.join(dir, "plugins", "cache"),
+    legacyRules: path6.join(projectRoot, ".cursorrules")
+  };
+}
+function backupDir() {
+  return path6.join(home(), ".yard", "backups");
+}
+var init_client_paths = __esm({
+  "src/env/client-paths.ts"() {
+    "use strict";
+  }
+});
+
+// src/env/safe-io.ts
+import { constants } from "node:fs";
+import { access, copyFile, mkdir as mkdir3, readFile as readFile4, readdir as readdir3, rename as rename2, rm as rm2, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
+import path7 from "node:path";
+async function exists2(target) {
+  try {
+    await access(target, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function isFile2(target) {
+  try {
+    return (await stat3(target)).isFile();
+  } catch {
+    return false;
+  }
+}
+async function isDir2(target) {
+  try {
+    return (await stat3(target)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+async function readText(file) {
+  try {
+    return await readFile4(file, "utf8");
+  } catch {
+    return void 0;
+  }
+}
+function parseJsonc(raw2) {
+  return JSON.parse(stripJsonComments(raw2));
+}
+async function readJsonChecked(file) {
+  const raw2 = await readText(file);
+  if (raw2 === void 0) {
+    return { missing: true };
+  }
+  try {
+    return { value: parseJsonc(raw2), missing: false };
+  } catch (error2) {
+    return { error: error2 instanceof Error ? error2.message : String(error2), missing: false };
+  }
+}
+async function listDirs(dir) {
+  try {
+    const entries = await readdir3(dir, { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  } catch {
+    return [];
+  }
+}
+async function listFiles(dir, extensions) {
+  try {
+    const entries = await readdir3(dir, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile()).map((entry) => entry.name).filter((name) => !extensions || extensions.includes(path7.extname(name))).sort();
+  } catch {
+    return [];
+  }
+}
+async function writeTextSafely(file, contents, options = {}) {
+  const before = await readText(file);
+  const created = before === void 0;
+  const changed = before !== contents;
+  if (!changed) {
+    return { file, changed: false, created: false, after: contents, ...before !== void 0 ? { before } : {} };
+  }
+  if (options.dryRun) {
+    return { file, changed: true, created, after: contents, ...before !== void 0 ? { before } : {} };
+  }
+  await mkdir3(path7.dirname(file), { recursive: true });
+  let backup;
+  if (before !== void 0 && options.backupDir) {
+    backup = await backupFile(file, options.backupDir);
+  }
+  const temp = `${file}.yard-${process.pid}-${Date.now()}.tmp`;
+  try {
+    await writeFile4(temp, contents, "utf8");
+    await rename2(temp, file);
+  } catch (error2) {
+    await rm2(temp, { force: true });
+    throw error2;
+  }
+  return {
+    file,
+    changed: true,
+    created,
+    after: contents,
+    ...before !== void 0 ? { before } : {},
+    ...backup ? { backup } : {}
+  };
+}
+async function writeJsonSafely(file, value, options = {}) {
+  const raw2 = await readText(file);
+  const indent = raw2 === void 0 ? 2 : detectIndent(raw2);
+  const trailingNewline = raw2 === void 0 ? true : raw2.endsWith("\n");
+  const body = JSON.stringify(value, null, indent);
+  return writeTextSafely(file, trailingNewline ? `${body}
+` : body, options);
+}
+async function backupFile(file, backupDir2) {
+  const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+  const target = path7.join(backupDir2, `${path7.basename(file)}.${stamp}.bak`);
+  await mkdir3(backupDir2, { recursive: true });
+  await copyFile(file, target);
+  return target;
+}
+function detectIndent(raw2) {
+  const match2 = /\n([ \t]+)\S/.exec(raw2);
+  if (!match2?.[1]) {
+    return 2;
+  }
+  return match2[1].startsWith("	") ? 1 : match2[1].length;
+}
+function stripJsonComments(raw2) {
+  let out = "";
+  let inString = false;
+  let inLine = false;
+  let inBlock = false;
+  for (let i = 0; i < raw2.length; i += 1) {
+    const char = raw2[i];
+    const next = raw2[i + 1];
+    if (inLine) {
+      if (char === "\n") {
+        inLine = false;
+        out += char;
+      }
+      continue;
+    }
+    if (inBlock) {
+      if (char === "*" && next === "/") {
+        inBlock = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      out += char;
+      if (char === "\\") {
+        const escaped = raw2[i + 1];
+        if (escaped !== void 0) {
+          out += escaped;
+          i += 1;
+        }
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      out += char;
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      inLine = true;
+      i += 1;
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      inBlock = true;
+      i += 1;
+      continue;
+    }
+    out += char;
+  }
+  return out.replace(/,(\s*[}\]])/g, "$1");
+}
+var init_safe_io = __esm({
+  "src/env/safe-io.ts"() {
+    "use strict";
+  }
+});
+
+// src/env/skill-dirs.ts
+import path8 from "node:path";
+async function collectSkillDirs(pluginRoot, declared) {
+  const found = /* @__PURE__ */ new Set();
+  await walk(path8.join(pluginRoot, "skills"), 0, found);
+  for (const entry of declaredPaths(declared)) {
+    const target = path8.resolve(pluginRoot, entry);
+    if (await isFile2(path8.join(target, "SKILL.md"))) {
+      found.add(target);
+      continue;
+    }
+    await walk(target, 0, found);
+  }
+  return [...found].sort();
+}
+function declaredPaths(declared) {
+  if (typeof declared === "string") {
+    return [declared];
+  }
+  if (Array.isArray(declared)) {
+    return declared.filter((entry) => typeof entry === "string");
+  }
+  return [];
+}
+async function walk(dir, depth, found) {
+  if (depth > MAX_DEPTH) {
+    return;
+  }
+  if (await isFile2(path8.join(dir, "SKILL.md"))) {
+    found.add(dir);
+    return;
+  }
+  for (const name of await listDirs(dir)) {
+    if (SKIP.has(name) || name.startsWith(".")) {
+      continue;
+    }
+    await walk(path8.join(dir, name), depth + 1, found);
+  }
+}
+var MAX_DEPTH, SKIP;
+var init_skill_dirs = __esm({
+  "src/env/skill-dirs.ts"() {
+    "use strict";
+    init_safe_io();
+    MAX_DEPTH = 4;
+    SKIP = /* @__PURE__ */ new Set(["node_modules", ".git", "assets", "scripts", "templates", "dist", "build"]);
+  }
+});
+
+// src/env/codex.ts
+var codex_exports = {};
+__export(codex_exports, {
+  addMcpServer: () => addMcpServer,
+  parseToml: () => parseToml,
+  removeMcpServer: () => removeMcpServer,
+  scanCodex: () => scanCodex,
+  setSkillDirectoryEnabled: () => setSkillDirectoryEnabled2
+});
+import { execFile } from "node:child_process";
+import { mkdir as mkdir5, readdir as readdir5, rename as rename4 } from "node:fs/promises";
+import path10 from "node:path";
+import { promisify } from "node:util";
+async function scanCodex(projectRoot) {
+  const paths = codexPaths(projectRoot);
+  const warnings = [];
+  const warn = (file, message) => {
+    warnings.push({ client: CLIENT, file, message });
+  };
+  const installed = await isDir2(paths.dir);
+  const skills = [];
+  const mcpServers = [];
+  const hooks = [];
+  const memory = [];
+  const config2 = await readConfig(paths.config, warn);
+  mcpServers.push(...configMcpServers(config2, paths.config, warn));
+  hooks.push(...await readHookFile(paths.hooks, "user", void 0, warn));
+  skills.push(...await readSkillTree(paths.userSkills, "user", "on", void 0, warn));
+  skills.push(
+    ...await readSkillTree(paths.userSkillsDisabled, "user", "off", paths.userSkillsDisabled, warn)
+  );
+  skills.push(
+    ...await readSkillTree(
+      path10.join(paths.userSkills, SYSTEM_SKILLS),
+      "builtin",
+      "on",
+      void 0,
+      warn
+    )
+  );
+  const plugins = await scanPlugins2(paths.pluginCacheDir, { skills, mcpServers, hooks }, warn);
+  for (const [scope, file] of [
+    ["user", paths.userMemory],
+    ["project", paths.projectMemory]
+  ]) {
+    const entry = await readMemory(file, scope, warn);
+    if (entry) {
+      memory.push(entry);
+    }
+  }
+  return {
+    installed,
+    skills,
+    plugins,
+    mcpServers,
+    hooks,
+    // Codex has no user-level agent or command directories: subagents ship
+    // inside plugins as skills, and prompts are not a scannable surface.
+    agents: [],
+    commands: [],
+    memory,
+    warnings
+  };
+}
+async function readTextChecked(file, warn) {
+  const raw2 = await readText(file);
+  if (raw2 === void 0 && await exists2(file)) {
+    warn(file, "exists but could not be read as a file (permissions, or a directory?)");
+  }
+  return raw2;
+}
+async function readConfig(file, warn) {
+  const raw2 = await readTextChecked(file, warn);
+  if (raw2 === void 0) {
+    return {};
+  }
+  try {
+    return parseToml(raw2);
+  } catch (error2) {
+    warn(file, `could not parse TOML: ${error2 instanceof Error ? error2.message : String(error2)}`);
+    return {};
+  }
+}
+function configMcpServers(config2, file, warn) {
+  const declared = config2["mcp_servers"];
+  const servers = asTable(declared);
+  if (!servers) {
+    if (declared !== void 0) {
+      warn(file, "mcp_servers is not a table");
+    }
+    return [];
+  }
+  const entries = [];
+  for (const [name, value] of Object.entries(servers)) {
+    const table = asTable(value);
+    if (!table) {
+      warn(file, `mcp_servers.${name} is not a table`);
+      continue;
+    }
+    const headers = asStringRecord2(table["http_headers"]);
+    entries.push(
+      mcpEntry({
+        id: `${CLIENT}:user:${name}`,
+        scope: "user",
+        name,
+        file,
+        table,
+        ...headers ? { headers } : {}
+      })
+    );
+  }
+  return entries;
+}
+function mcpEntry(source) {
+  const { table } = source;
+  const url2 = asString(table["url"]);
+  const command = asString(table["command"]);
+  const args = asStringArray2(table["args"]);
+  const env = asStringRecord2(table["env"]);
+  const cwd = asString(table["cwd"]);
+  const headers = source.headers ?? asStringRecord2(table["headers"]);
+  const enabled = asBoolean(table["enabled"]);
+  return {
+    id: source.id,
+    client: CLIENT,
+    scope: source.scope,
+    name: source.name,
+    transport: transportOf(asString(table["type"]), url2),
+    ...command !== void 0 ? { command } : {},
+    ...args ? { args } : {},
+    ...env ? { env } : {},
+    ...cwd !== void 0 ? { cwd } : {},
+    ...url2 !== void 0 ? { url: url2 } : {},
+    ...headers ? { headers } : {},
+    file: source.file,
+    ...source.plugin !== void 0 ? { plugin: source.plugin } : {},
+    enabled: enabled ?? true,
+    ...enabled === void 0 ? {} : { enabledSource: source.file }
+  };
+}
+function transportOf(declared, url2) {
+  if (declared === "stdio" || declared === "http" || declared === "sse" || declared === "ws") {
+    return declared;
+  }
+  return url2 === void 0 ? "stdio" : "http";
+}
+async function readHookFile(file, scope, plugin, warn, required2 = false) {
+  const read = await readJsonChecked(file);
+  if (read.missing) {
+    if (await exists2(file)) {
+      warn(file, "exists but could not be read as a file (permissions, or a directory?)");
+    } else if (required2) {
+      warn(file, "referenced by the plugin manifest but missing");
+    }
+    return [];
+  }
+  if (read.error !== void 0 || !read.value) {
+    warn(file, `could not parse JSON: ${read.error ?? "empty file"}`);
+    return [];
+  }
+  const events = asTable(read.value.hooks);
+  if (!events) {
+    warn(file, 'no "hooks" object');
+    return [];
+  }
+  return hookEntries(events, file, scope, plugin, warn);
+}
+function hookEntries(events, file, scope, plugin, warn) {
+  const entries = [];
+  for (const [event, groups] of Object.entries(events)) {
+    if (!Array.isArray(groups)) {
+      warn(file, `hooks.${event} is not an array`);
+      continue;
+    }
+    let index = 0;
+    for (const group of groups) {
+      const groupTable = asTable(group);
+      const matcher = asString(groupTable?.["matcher"]);
+      const list = groupTable?.["hooks"];
+      if (!Array.isArray(list)) {
+        warn(file, `hooks.${event} entry has no "hooks" array`);
+        continue;
+      }
+      for (const hook of list) {
+        const table = asTable(hook);
+        const command = asString(table?.["command"]);
+        if (!table || command === void 0) {
+          warn(file, `hooks.${event}[${index}] has no command`);
+          index += 1;
+          continue;
+        }
+        const type = table["type"] === "prompt" ? "prompt" : "command";
+        const timeout = asNumber(table["timeout"]);
+        entries.push({
+          id: `${CLIENT}:${scope}:${plugin ? `${plugin}:` : ""}${event}:${index}`,
+          client: CLIENT,
+          scope,
+          event,
+          ...matcher !== void 0 ? { matcher } : {},
+          type,
+          command,
+          ...timeout !== void 0 ? { timeout } : {},
+          file,
+          ...plugin !== void 0 ? { plugin } : {},
+          enabled: true,
+          index
+        });
+        index += 1;
+      }
+    }
+  }
+  return entries;
+}
+async function readSkillTree(root, scope, visibility, visibilitySource, warn, plugin, skillDirs) {
+  const entries = [];
+  const dirs = skillDirs ?? await listSkillDirs(root, warn);
+  for (const skillDir of dirs) {
+    const name = path10.basename(skillDir);
+    if (name.startsWith(".")) {
+      continue;
+    }
+    const entry = await readSkill(skillDir, name, warn, {
+      scope,
+      visibility,
+      ...visibilitySource !== void 0 ? { visibilitySource } : {},
+      ...plugin !== void 0 ? { plugin } : {}
+    });
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+  return entries;
+}
+async function listSkillDirs(root, warn) {
+  let names;
+  try {
+    names = (await readdir5(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() || entry.isSymbolicLink()).map((entry) => ({ name: entry.name, link: !entry.isDirectory() }));
+  } catch {
+    return [];
+  }
+  names.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const dirs = [];
+  for (const entry of names) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+    const dir = path10.join(root, entry.name);
+    if (!entry.link) {
+      dirs.push(dir);
+      continue;
+    }
+    if (await isDir2(dir)) {
+      dirs.push(dir);
+      continue;
+    }
+    warn(dir, "skill symlink does not resolve to a directory");
+  }
+  return dirs;
+}
+async function readSkill(dir, name, warn, options) {
+  const file = path10.join(dir, "SKILL.md");
+  const raw2 = await readText(file);
+  if (raw2 === void 0) {
+    warn(file, "skill directory has no readable SKILL.md");
+    return void 0;
+  }
+  const { data } = parseFrontmatter(raw2);
+  const qualifiedName = options.plugin ? `${options.plugin}:${name}` : name;
+  return {
+    id: `${CLIENT}:${options.scope}:${qualifiedName}`,
+    client: CLIENT,
+    scope: options.scope,
+    name,
+    qualifiedName,
+    description: data["description"] ?? "",
+    file,
+    dir,
+    ...options.plugin !== void 0 ? { plugin: options.plugin } : {},
+    visibility: options.visibility,
+    ...options.visibilitySource !== void 0 ? { visibilitySource: options.visibilitySource } : {},
+    frontmatter: data,
+    bytes: Buffer.byteLength(raw2, "utf8")
+  };
+}
+async function readMemory(file, scope, warn) {
+  const raw2 = await readTextChecked(file, warn);
+  if (raw2 === void 0) {
+    return void 0;
+  }
+  return {
+    id: `${CLIENT}:${scope}:${path10.basename(file)}`,
+    client: CLIENT,
+    scope,
+    name: path10.basename(file),
+    file,
+    bytes: Buffer.byteLength(raw2, "utf8")
+  };
+}
+async function scanPlugins2(cacheDir, collected, warn) {
+  const plugins = [];
+  for (const marketplace of await listDirs(cacheDir)) {
+    const marketplaceDir = path10.join(cacheDir, marketplace);
+    const installed = /* @__PURE__ */ new Set();
+    for (const dirName of await listDirs(marketplaceDir)) {
+      const root = await resolvePluginRoot(path10.join(marketplaceDir, dirName));
+      if (!root) {
+        continue;
+      }
+      const entry = await readPlugin(root, dirName, marketplace, collected, warn);
+      installed.add(dirName);
+      installed.add(entry.name);
+      plugins.push(entry);
+    }
+    plugins.push(...await declaredPlugins(marketplaceDir, marketplace, installed, warn));
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return plugins.map((plugin) => {
+    const id = uniquePluginId(plugin.id, plugin.marketplace ?? "", seen);
+    return id === plugin.id ? plugin : { ...plugin, id };
+  });
+}
+function uniquePluginId(base, marketplace, seen) {
+  const qualified = `${base}@${marketplace}`;
+  let id = seen.has(base) ? qualified : base;
+  for (let n = 2; seen.has(id); n += 1) {
+    id = `${qualified}#${n}`;
+  }
+  seen.add(id);
+  return id;
+}
+async function resolvePluginRoot(dir) {
+  if (await isFile2(path10.join(dir, PLUGIN_MANIFEST))) {
+    return dir;
+  }
+  const versions = await listDirs(dir);
+  for (const version2 of [...versions].reverse()) {
+    const candidate = path10.join(dir, version2);
+    if (await isFile2(path10.join(candidate, PLUGIN_MANIFEST))) {
+      return candidate;
+    }
+  }
+  return void 0;
+}
+async function readPlugin(root, dirName, marketplace, collected, warn) {
+  const manifestFile = path10.join(root, PLUGIN_MANIFEST);
+  const read = await readJsonChecked(manifestFile);
+  if (read.error !== void 0) {
+    warn(manifestFile, `could not parse JSON: ${read.error}`);
+  }
+  if (read.value !== void 0 && !isTable(read.value)) {
+    warn(manifestFile, "plugin manifest is not an object");
+  }
+  const manifest = isTable(read.value) ? read.value : {};
+  const name = asString(manifest.name) ?? dirName;
+  const skills = await readSkillTree(
+    path10.resolve(root, DEFAULT_PLUGIN_SKILLS),
+    "plugin",
+    "on",
+    void 0,
+    warn,
+    name,
+    await collectSkillDirs(root, containedRefs(root, manifest.skills, manifestFile, warn))
+  );
+  const mcpServers = await pluginMcpServers(root, manifest, name, warn);
+  const hooks = await pluginHooks(root, manifest, name, warn);
+  collected.skills.push(...skills);
+  collected.mcpServers.push(...mcpServers);
+  collected.hooks.push(...hooks);
+  return {
+    id: `${CLIENT}:plugin:${name}`,
+    client: CLIENT,
+    scope: "plugin",
+    name,
+    marketplace,
+    qualifiedName: name,
+    description: asString(manifest.description) ?? "",
+    version: asString(manifest.version) ?? path10.basename(root),
+    root,
+    enabled: true,
+    installed: true,
+    skills: skills.length,
+    hooks: hooks.length,
+    mcpServers: mcpServers.length
+  };
+}
+function containedPath(root, relative) {
+  const resolved = path10.resolve(root, relative);
+  const rel = path10.relative(root, resolved);
+  if (rel === ".." || rel.startsWith(`..${path10.sep}`) || path10.isAbsolute(rel)) {
+    return void 0;
+  }
+  return resolved;
+}
+function containedRefs(root, declared, file, warn) {
+  const raw2 = typeof declared === "string" ? [declared] : Array.isArray(declared) ? declared : [];
+  const kept = [];
+  for (const entry of raw2) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+    if (containedPath(root, entry) === void 0) {
+      warn(file, `skills path "${entry}" points outside the plugin directory`);
+      continue;
+    }
+    kept.push(entry);
+  }
+  return kept;
+}
+async function pluginMcpServers(root, manifest, plugin, warn) {
+  const resolved = await resolveManifestRef(
+    root,
+    manifest.mcpServers,
+    warn
+  );
+  if (!resolved) {
+    return [];
+  }
+  const servers = asTable(resolved.value["mcpServers"] ?? resolved.value);
+  if (!servers) {
+    warn(resolved.file, 'no "mcpServers" object');
+    return [];
+  }
+  const entries = [];
+  for (const [name, value] of Object.entries(servers)) {
+    const table = asTable(value);
+    if (!table) {
+      warn(resolved.file, `mcpServers.${name} is not an object`);
+      continue;
+    }
+    entries.push(
+      mcpEntry({
+        id: `${CLIENT}:plugin:${plugin}:${name}`,
+        scope: "plugin",
+        name,
+        file: resolved.file,
+        table,
+        plugin
+      })
+    );
+  }
+  return entries;
+}
+async function pluginHooks(root, manifest, plugin, warn) {
+  const manifestFile = path10.join(root, PLUGIN_MANIFEST);
+  const inline = asTable(manifest.hooks);
+  if (inline) {
+    const events = asTable(inline["hooks"]) ?? inline;
+    return hookEntries(events, manifestFile, "plugin", plugin, warn);
+  }
+  const declared = asString(manifest.hooks);
+  const file = containedPath(root, declared ?? "hooks.json");
+  if (file === void 0) {
+    warn(manifestFile, `hooks path "${declared ?? ""}" points outside the plugin directory`);
+    return [];
+  }
+  return readHookFile(file, "plugin", plugin, warn, declared !== void 0);
+}
+async function resolveManifestRef(root, ref, warn) {
+  if (isTable(ref)) {
+    return { file: path10.join(root, PLUGIN_MANIFEST), value: ref };
+  }
+  const relative = asString(ref);
+  if (relative === void 0) {
+    return void 0;
+  }
+  const file = containedPath(root, relative);
+  if (file === void 0) {
+    warn(path10.join(root, PLUGIN_MANIFEST), `"${relative}" points outside the plugin directory`);
+    return void 0;
+  }
+  const read = await readJsonChecked(file);
+  if (read.missing) {
+    warn(
+      file,
+      await exists2(file) ? "exists but could not be read as a file (permissions, or a directory?)" : "referenced by the plugin manifest but missing"
+    );
+    return void 0;
+  }
+  if (read.error !== void 0 || !read.value) {
+    warn(file, `could not parse JSON: ${read.error ?? "empty file"}`);
+    return void 0;
+  }
+  return { file, value: read.value };
+}
+async function declaredPlugins(marketplaceDir, marketplace, installed, warn) {
+  const file = path10.join(marketplaceDir, MARKETPLACE_MANIFEST);
+  const read = await readJsonChecked(file);
+  if (read.missing) {
+    return [];
+  }
+  if (read.error !== void 0 || !read.value) {
+    warn(file, `could not parse JSON: ${read.error ?? "empty file"}`);
+    return [];
+  }
+  const listed = read.value.plugins;
+  if (!Array.isArray(listed)) {
+    warn(file, 'no "plugins" array');
+    return [];
+  }
+  const entries = [];
+  for (const item of listed) {
+    const name = asString(asTable(item)?.["name"]);
+    if (name === void 0 || installed.has(name)) {
+      continue;
+    }
+    entries.push({
+      id: `${CLIENT}:plugin:${name}`,
+      client: CLIENT,
+      scope: "plugin",
+      name,
+      marketplace,
+      qualifiedName: name,
+      description: asString(asTable(item)?.["description"]) ?? "",
+      version: "",
+      enabled: false,
+      enabledSource: file,
+      installed: false,
+      skills: 0,
+      hooks: 0,
+      mcpServers: 0
+    });
+  }
+  return entries;
+}
+async function setSkillDirectoryEnabled2(opts) {
+  const paths = codexPaths(process.cwd());
+  if (opts.skill.includes(":")) {
+    throw new Error(
+      `"${opts.skill}" is a plugin skill; it lives in the plugin cache, not under ${paths.userSkills}`
+    );
+  }
+  if (opts.skill === "" || opts.skill.startsWith(".") || opts.skill.includes("/") || opts.skill.includes("\\")) {
+    throw new Error(`"${opts.skill}" is not a plain skill directory name`);
+  }
+  const enabledDir = path10.join(paths.userSkills, opts.skill);
+  const disabledDir = path10.join(paths.userSkillsDisabled, opts.skill);
+  const inEnabled = await isDir2(enabledDir);
+  const inDisabled = await isDir2(disabledDir);
+  if (inEnabled && inDisabled) {
+    throw new Error(
+      `"${opts.skill}" exists in both ${paths.userSkills} and ${paths.userSkillsDisabled}; resolve that by hand first`
+    );
+  }
+  if (!inEnabled && !inDisabled) {
+    throw new Error(
+      `no personal skill "${opts.skill}" under ${paths.userSkills} or ${paths.userSkillsDisabled}`
+    );
+  }
+  const from = opts.enabled ? disabledDir : enabledDir;
+  const to = opts.enabled ? enabledDir : disabledDir;
+  if (opts.enabled ? inEnabled : inDisabled) {
+    return { from: to, to, moved: false };
+  }
+  if (opts.dryRun) {
+    return { from, to, moved: false };
+  }
+  await mkdir5(path10.dirname(to), { recursive: true });
+  await rename4(from, to);
+  return { from, to, moved: true };
+}
+async function addMcpServer(options) {
+  const hasCommand = options.command !== void 0 && options.command !== "";
+  const hasUrl = options.url !== void 0 && options.url !== "";
+  if (hasCommand === hasUrl) {
+    throw new Error(`addMcpServer(${options.name}): pass exactly one of command or url`);
+  }
+  assertServerName(options.name);
+  const argv = ["mcp", "add", options.name];
+  for (const [key, value] of Object.entries(options.env ?? {})) {
+    argv.push("--env", `${key}=${value}`);
+  }
+  if (options.bearerTokenEnvVar !== void 0) {
+    argv.push("--bearer-token-env-var", options.bearerTokenEnvVar);
+  }
+  if (hasUrl) {
+    argv.push("--url", options.url);
+  } else {
+    argv.push("--", options.command, ...options.args ?? []);
+  }
+  return runCodex(argv, options);
+}
+async function removeMcpServer(name, options = {}) {
+  assertServerName(name);
+  return runCodex(["mcp", "remove", name], options);
+}
+function assertServerName(name) {
+  if (name === "" || name.startsWith("-")) {
+    throw new Error(`"${name}" is not a usable MCP server name`);
+  }
+}
+async function runCodex(argv, options) {
+  if (options.dryRun) {
+    return { argv, ran: false, stdout: "", stderr: "" };
+  }
+  const bin = process.env.YARD_CODEX_BIN ?? "codex";
+  try {
+    const { stdout, stderr } = await execFileAsync(bin, argv, {
+      timeout: options.timeoutMs ?? CODEX_CLI_TIMEOUT_MS,
+      encoding: "utf8"
+    });
+    return { argv, ran: true, stdout, stderr };
+  } catch (error2) {
+    const config2 = codexPaths(process.cwd()).config;
+    if (error2.code === "ENOENT") {
+      throw new Error(
+        `the \`${bin}\` CLI is not installed or not on PATH, so \`codex ${argv.join(" ")}\` could not run. Edit ${config2} by hand instead.`
+      );
+    }
+    const stderr = typeof error2.stderr === "string" ? error2.stderr.trim() : "";
+    throw new Error(
+      `\`${bin} ${argv.join(" ")}\` failed${stderr ? `: ${stderr}` : ""}. ${config2} was left unchanged.`
+    );
+  }
+}
+function parseToml(raw2) {
+  const root = {};
+  let current = root;
+  const lines = raw2.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = (lines[i] ?? "").trim();
+    if (line === "" || line.startsWith("#")) {
+      continue;
+    }
+    try {
+      if (line.startsWith("[")) {
+        current = openTable(root, line);
+        continue;
+      }
+      let buffer = line;
+      for (; ; ) {
+        try {
+          const { keys, value } = parseAssignment(buffer);
+          assign(current, keys, value);
+          break;
+        } catch (error2) {
+          const next = lines[i + 1];
+          if (!(error2 instanceof IncompleteValue) || next === void 0) {
+            throw error2;
+          }
+          i += 1;
+          buffer = `${buffer}
+${next}`;
+        }
+      }
+    } catch (error2) {
+      throw new Error(`line ${i + 1}: ${error2 instanceof Error ? error2.message : String(error2)}`);
+    }
+  }
+  return root;
+}
+function openTable(root, line) {
+  const cursor = { text: line, pos: 1 };
+  const isArrayTable = line[1] === "[";
+  if (isArrayTable) {
+    cursor.pos += 1;
+  }
+  const keys = parseKeyPath(cursor);
+  skipTrivia(cursor);
+  const close = isArrayTable ? "]]" : "]";
+  if (!cursor.text.startsWith(close, cursor.pos)) {
+    throw new Error("unterminated table header");
+  }
+  cursor.pos += close.length;
+  skipTrivia(cursor);
+  if (cursor.pos < cursor.text.length) {
+    throw new Error(`unexpected text after table header: ${cursor.text.slice(cursor.pos)}`);
+  }
+  return isArrayTable ? appendTable(root, keys) : ensureTable(root, keys);
+}
+function parseAssignment(text) {
+  const cursor = { text, pos: 0 };
+  const keys = parseKeyPath(cursor);
+  skipTrivia(cursor);
+  if (cursor.text[cursor.pos] !== "=") {
+    throw new Error('expected "=" after key');
+  }
+  cursor.pos += 1;
+  const value = parseValue(cursor);
+  skipTrivia(cursor);
+  if (cursor.pos < cursor.text.length) {
+    throw new Error(`unexpected text after value: ${cursor.text.slice(cursor.pos)}`);
+  }
+  return { keys, value };
+}
+function skipTrivia(cursor) {
+  while (cursor.pos < cursor.text.length) {
+    const char = cursor.text[cursor.pos];
+    if (char === " " || char === "	" || char === "\n" || char === "\r") {
+      cursor.pos += 1;
+      continue;
+    }
+    if (char === "#") {
+      while (cursor.pos < cursor.text.length && cursor.text[cursor.pos] !== "\n") {
+        cursor.pos += 1;
+      }
+      continue;
+    }
+    break;
+  }
+}
+function parseKeyPath(cursor) {
+  const keys = [];
+  for (; ; ) {
+    skipTrivia(cursor);
+    const char = cursor.text[cursor.pos];
+    if (char === '"' || char === "'") {
+      keys.push(parseString(cursor));
+    } else {
+      const start = cursor.pos;
+      while (cursor.pos < cursor.text.length && BARE_KEY.test(cursor.text[cursor.pos])) {
+        cursor.pos += 1;
+      }
+      if (cursor.pos === start) {
+        throw new Error("expected a key");
+      }
+      keys.push(cursor.text.slice(start, cursor.pos));
+    }
+    skipTrivia(cursor);
+    if (cursor.text[cursor.pos] !== ".") {
+      return keys;
+    }
+    cursor.pos += 1;
+  }
+}
+function parseValue(cursor) {
+  skipTrivia(cursor);
+  if (cursor.pos >= cursor.text.length) {
+    throw new Error("expected a value");
+  }
+  const char = cursor.text[cursor.pos];
+  if (char === '"' || char === "'") {
+    return parseString(cursor);
+  }
+  if (char === "[") {
+    return parseArray(cursor);
+  }
+  if (char === "{") {
+    return parseInlineTable(cursor);
+  }
+  return parseScalar(cursor);
+}
+function parseString(cursor) {
+  const quote = cursor.text[cursor.pos];
+  const triple = cursor.text.startsWith(quote.repeat(3), cursor.pos);
+  const delimiter = triple ? quote.repeat(3) : quote;
+  const literal2 = quote === "'";
+  cursor.pos += delimiter.length;
+  if (triple && cursor.text[cursor.pos] === "\n") {
+    cursor.pos += 1;
+  }
+  let out = "";
+  for (; ; ) {
+    if (cursor.pos >= cursor.text.length) {
+      if (triple) {
+        throw new IncompleteValue("unterminated multi-line string");
+      }
+      throw new Error("unterminated string");
+    }
+    if (cursor.text.startsWith(delimiter, cursor.pos)) {
+      cursor.pos += delimiter.length;
+      return out;
+    }
+    const char = cursor.text[cursor.pos];
+    if (!triple && (char === "\n" || char === "\r")) {
+      throw new Error("unterminated string");
+    }
+    if (!literal2 && char === "\\") {
+      out += readEscape(cursor, triple);
+      continue;
+    }
+    out += char;
+    cursor.pos += 1;
+  }
+}
+function readEscape(cursor, triple) {
+  cursor.pos += 1;
+  const char = cursor.text[cursor.pos];
+  if (char === void 0) {
+    if (triple) {
+      throw new IncompleteValue("unterminated escape");
+    }
+    throw new Error("unterminated escape");
+  }
+  const simple = SIMPLE_ESCAPES[char];
+  if (simple !== void 0) {
+    cursor.pos += 1;
+    return simple;
+  }
+  if (char === "u" || char === "U") {
+    const width = char === "u" ? 4 : 8;
+    const digits = cursor.text.slice(cursor.pos + 1, cursor.pos + 1 + width);
+    if (!new RegExp(`^[0-9a-fA-F]{${width}}$`).test(digits)) {
+      throw new Error(`bad \\${char} escape`);
+    }
+    cursor.pos += 1 + width;
+    return String.fromCodePoint(Number.parseInt(digits, 16));
+  }
+  if (triple && /\s/.test(char)) {
+    while (cursor.pos < cursor.text.length && /\s/.test(cursor.text[cursor.pos])) {
+      cursor.pos += 1;
+    }
+    return "";
+  }
+  throw new Error(`unknown escape: \\${char}`);
+}
+function parseArray(cursor) {
+  cursor.pos += 1;
+  const items = [];
+  for (; ; ) {
+    skipTrivia(cursor);
+    if (cursor.pos >= cursor.text.length) {
+      throw new IncompleteValue("unterminated array");
+    }
+    if (cursor.text[cursor.pos] === "]") {
+      cursor.pos += 1;
+      return items;
+    }
+    items.push(parseValue(cursor));
+    skipTrivia(cursor);
+    if (cursor.pos >= cursor.text.length) {
+      throw new IncompleteValue("unterminated array");
+    }
+    const char = cursor.text[cursor.pos];
+    if (char === ",") {
+      cursor.pos += 1;
+      continue;
+    }
+    if (char === "]") {
+      cursor.pos += 1;
+      return items;
+    }
+    throw new Error(`expected "," or "]" in array, got ${String(char)}`);
+  }
+}
+function parseInlineTable(cursor) {
+  cursor.pos += 1;
+  const table = {};
+  for (; ; ) {
+    skipTrivia(cursor);
+    if (cursor.pos >= cursor.text.length) {
+      throw new IncompleteValue("unterminated inline table");
+    }
+    if (cursor.text[cursor.pos] === "}") {
+      cursor.pos += 1;
+      return table;
+    }
+    const keys = parseKeyPath(cursor);
+    skipTrivia(cursor);
+    if (cursor.text[cursor.pos] !== "=") {
+      throw new Error('expected "=" in inline table');
+    }
+    cursor.pos += 1;
+    assign(table, keys, parseValue(cursor));
+    skipTrivia(cursor);
+    if (cursor.text[cursor.pos] === ",") {
+      cursor.pos += 1;
+    }
+  }
+}
+function parseScalar(cursor) {
+  const start = cursor.pos;
+  while (cursor.pos < cursor.text.length && !",]}#\n\r".includes(cursor.text[cursor.pos])) {
+    cursor.pos += 1;
+  }
+  const token = cursor.text.slice(start, cursor.pos).trim();
+  cursor.pos = start + cursor.text.slice(start, cursor.pos).trimEnd().length;
+  if (token === "") {
+    throw new Error("expected a value");
+  }
+  if (token === "true" || token === "false") {
+    return token === "true";
+  }
+  const digits = token.replace(/_/g, "");
+  if (RADIX_INTEGER.test(token)) {
+    const radix = token[1] === "x" ? 16 : token[1] === "o" ? 8 : 2;
+    return Number.parseInt(digits.slice(2), radix);
+  }
+  if (INTEGER.test(token) || FLOAT.test(token)) {
+    return Number(digits);
+  }
+  if (/^[+-]?inf$/.test(token)) {
+    return token.startsWith("-") ? -Infinity : Infinity;
+  }
+  if (/^[+-]?nan$/.test(token)) {
+    return NaN;
+  }
+  return token;
+}
+function ensureTable(root, keys) {
+  let node = root;
+  for (const key of keys) {
+    const existing = node[key];
+    if (existing === void 0) {
+      const created = {};
+      node[key] = created;
+      node = created;
+      continue;
+    }
+    if (Array.isArray(existing)) {
+      const last = existing[existing.length - 1];
+      if (!isTable(last)) {
+        throw new Error(`cannot descend into ${key}`);
+      }
+      node = last;
+      continue;
+    }
+    if (!isTable(existing)) {
+      throw new Error(`cannot redefine ${key} as a table`);
+    }
+    node = existing;
+  }
+  return node;
+}
+function appendTable(root, keys) {
+  const last = keys[keys.length - 1];
+  if (last === void 0) {
+    throw new Error("empty table header");
+  }
+  const parent = ensureTable(root, keys.slice(0, -1));
+  const existing = parent[last];
+  const list = Array.isArray(existing) ? existing : [];
+  if (existing !== void 0 && !Array.isArray(existing)) {
+    throw new Error(`cannot redefine ${last} as an array of tables`);
+  }
+  const created = {};
+  list.push(created);
+  parent[last] = list;
+  return created;
+}
+function assign(table, keys, value) {
+  const last = keys[keys.length - 1];
+  if (last === void 0) {
+    throw new Error("empty key");
+  }
+  ensureTable(table, keys.slice(0, -1))[last] = value;
+}
+function isTable(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function asTable(value) {
+  return isTable(value) ? value : void 0;
+}
+function asString(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function asNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+function asBoolean(value) {
+  return typeof value === "boolean" ? value : void 0;
+}
+function asStringArray2(value) {
+  if (!Array.isArray(value)) {
+    return void 0;
+  }
+  const out = value.filter((item) => typeof item === "string");
+  return out.length === value.length ? out : void 0;
+}
+function asStringRecord2(value) {
+  const table = asTable(value);
+  if (!table) {
+    return void 0;
+  }
+  const out = {};
+  for (const [key, item] of Object.entries(table)) {
+    if (typeof item === "string") {
+      out[key] = item;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : void 0;
+}
+var CLIENT, PLUGIN_MANIFEST, MARKETPLACE_MANIFEST, SYSTEM_SKILLS, DEFAULT_PLUGIN_SKILLS, CODEX_CLI_TIMEOUT_MS, execFileAsync, IncompleteValue, BARE_KEY, SIMPLE_ESCAPES, INTEGER, RADIX_INTEGER, FLOAT;
+var init_codex = __esm({
+  "src/env/codex.ts"() {
+    "use strict";
+    init_frontmatter();
+    init_client_paths();
+    init_skill_dirs();
+    init_safe_io();
+    CLIENT = "codex";
+    PLUGIN_MANIFEST = path10.join(".codex-plugin", "plugin.json");
+    MARKETPLACE_MANIFEST = path10.join(".agents", "plugins", "marketplace.json");
+    SYSTEM_SKILLS = ".system";
+    DEFAULT_PLUGIN_SKILLS = "./skills/";
+    CODEX_CLI_TIMEOUT_MS = 15e3;
+    execFileAsync = promisify(execFile);
+    IncompleteValue = class extends Error {
+    };
+    BARE_KEY = /[A-Za-z0-9_-]/;
+    SIMPLE_ESCAPES = {
+      b: "\b",
+      t: "	",
+      n: "\n",
+      f: "\f",
+      r: "\r",
+      '"': '"',
+      "\\": "\\"
+    };
+    INTEGER = /^[+-]?[0-9](?:[0-9_]*[0-9])?$/;
+    RADIX_INTEGER = /^0(x[0-9a-fA-F_]+|o[0-7_]+|b[01_]+)$/;
+    FLOAT = /^[+-]?[0-9](?:[0-9_]*[0-9])?(?:\.[0-9](?:[0-9_]*[0-9])?)?(?:[eE][+-]?[0-9_]+)?$/;
+  }
+});
+
+// src/cli/args.ts
+import path from "node:path";
+
+// src/env/types.ts
+var CLIENTS = ["claude", "codex", "cursor"];
+var SKILL_VISIBILITIES = ["on", "name-only", "user-invocable-only", "off"];
+function emptyInventory(projectRoot) {
+  return {
+    projectRoot,
+    clients: [],
+    skills: [],
+    plugins: [],
+    mcpServers: [],
+    hooks: [],
+    agents: [],
+    commands: [],
+    memory: [],
+    warnings: []
+  };
+}
+
+// src/cli/args.ts
+var CliError = class extends Error {
+};
+var VALUE_FLAGS = /* @__PURE__ */ new Set(["project", "client", "kind", "scope", "name", "dest", "port", "probe-timeout"]);
+function parseArgs(argv) {
+  const positionals = [];
+  const flags = /* @__PURE__ */ new Map();
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === void 0) {
+      continue;
+    }
+    if (!token.startsWith("--")) {
+      positionals.push(token);
+      continue;
+    }
+    const body = token.slice(2);
+    const eq = body.indexOf("=");
+    if (eq !== -1) {
+      flags.set(body.slice(0, eq), body.slice(eq + 1));
+      continue;
+    }
+    const next = argv[index + 1];
+    if (VALUE_FLAGS.has(body) && next !== void 0 && !next.startsWith("--")) {
+      flags.set(body, next);
+      index += 1;
+      continue;
+    }
+    flags.set(body, true);
+  }
+  const [verb, ...rest] = positionals;
+  return { verb, positionals: rest, flags };
+}
+function flagString(args, name) {
+  const value = args.flags.get(name);
+  if (value === void 0) {
+    return void 0;
+  }
+  if (value === true) {
+    throw new CliError(`--${name} needs a value, as --${name}=<value>`);
+  }
+  return value;
+}
+function flagBool(args, name) {
+  return args.flags.get(name) !== void 0;
+}
+function flagNumber(args, name) {
+  const value = flagString(args, name);
+  if (value === void 0) {
+    return void 0;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new CliError(`--${name} must be a number, got "${value}"`);
+  }
+  return parsed;
+}
+function flagEnum(args, name, allowed) {
+  const value = flagString(args, name);
+  if (value === void 0) {
+    return void 0;
+  }
+  if (!allowed.includes(value)) {
+    throw new CliError(`--${name} must be one of ${allowed.join(", ")}, got "${value}"`);
+  }
+  return value;
+}
+function commonOptions(args) {
+  const client = flagEnum(args, "client", CLIENTS);
+  return {
+    projectRoot: path.resolve(flagString(args, "project") ?? process.cwd()),
+    json: flagBool(args, "json"),
+    ...client ? { client } : {}
+  };
+}
+function rejectUnknownFlags(args, known) {
+  for (const flag of args.flags.keys()) {
+    if (!known.includes(flag)) {
+      throw new CliError(`unknown flag --${flag}`);
+    }
+  }
+}
+var GLOBAL_FLAGS = ["json", "project", "help"];
+
+// src/adapt.ts
+init_frontmatter();
+import { cp as cp2, mkdir as mkdir2, readFile as readFile3, readdir as readdir2, rm, stat as stat2, writeFile as writeFile3 } from "node:fs/promises";
+import path5 from "node:path";
+
+// src/mcp-spec.ts
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path2 from "node:path";
+var AGENT_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
+var YARD_MCP_SERVERS = [
+  {
+    key: "yard",
+    description: "Yard control plane. Search, hydrate, and attach marketplace artifacts over stdio.",
+    command: "node",
+    claudeArgs: ["${CLAUDE_PLUGIN_ROOT}/dist/cli.js", "--stdio"],
+    agentArgs: ["./dist/cli.js", "--stdio"],
+    claudeEnv: { YARD_ROOT: "${CLAUDE_PROJECT_DIR}" },
+    agentCwd: "./"
+  }
+];
+function emitClaudeMcp(servers = YARD_MCP_SERVERS) {
+  return {
+    mcpServers: Object.fromEntries(
+      servers.map((server) => [
+        server.key,
+        {
+          command: server.command,
+          args: server.claudeArgs,
+          ...server.claudeEnv ? { env: server.claudeEnv } : {}
+        }
+      ])
+    )
+  };
+}
+function emitAgentMcp(servers = YARD_MCP_SERVERS) {
+  return {
+    $schema: AGENT_MCP_SCHEMA,
+    mcpServers: Object.fromEntries(
+      servers.map((server) => [
+        server.key,
+        {
+          type: "stdio",
+          command: server.command,
+          args: server.agentArgs,
+          ...server.agentCwd ? { cwd: server.agentCwd } : {}
+        }
+      ])
+    )
+  };
+}
+async function writeMcpFiles(pluginRoot, servers = YARD_MCP_SERVERS) {
+  await mkdir(pluginRoot, { recursive: true });
+  await writeFile(path2.join(pluginRoot, ".mcp.json"), `${JSON.stringify(emitClaudeMcp(servers), null, 2)}
+`);
+  await writeFile(path2.join(pluginRoot, "mcp.json"), `${JSON.stringify(emitAgentMcp(servers), null, 2)}
+`);
+  await patchManifest(path2.join(pluginRoot, ".cursor-plugin", "plugin.json"), emitCursorMcp(servers));
+  await patchManifest(path2.join(pluginRoot, ".codex-plugin", "plugin.json"), "./.mcp.json");
+}
+async function patchManifest(file, mcpServers) {
+  const raw2 = await readOptionalJson(file);
+  if (!raw2 || typeof raw2 !== "object") {
+    return;
+  }
+  await writeFile(file, `${JSON.stringify({ ...raw2, mcpServers }, null, 2)}
+`);
+}
+async function parsePluginMcp(pluginName, pluginRoot) {
+  const claudeRaw = await readOptionalJson(path2.join(pluginRoot, ".mcp.json"));
+  const agentRaw = await readOptionalJson(path2.join(pluginRoot, "mcp.json"));
+  const raw2 = claudeRaw ?? agentRaw;
+  if (!raw2) {
+    return [];
+  }
+  return serverKeys(raw2).map((key) => ({
+    key,
+    plugin: pluginName,
+    transport: transportFromClaude(lookupServer(raw2, key)),
+    source: claudeRaw ? "claude" : "agent"
+  }));
+}
+function emitCursorMcp(servers = YARD_MCP_SERVERS) {
+  return Object.fromEntries(
+    servers.map((server) => [
+      server.key,
+      {
+        command: server.command,
+        args: server.agentArgs
+      }
+    ])
+  );
+}
+function serverKeys(raw2) {
+  if (!raw2 || typeof raw2 !== "object") {
+    return [];
+  }
+  const record2 = raw2;
+  const wrapped = record2.mcpServers;
+  if (wrapped && typeof wrapped === "object" && !Array.isArray(wrapped)) {
+    return Object.keys(wrapped).sort();
+  }
+  return Object.keys(record2).filter((key) => key !== "$schema").sort();
+}
+function lookupServer(raw2, key) {
+  if (!raw2 || typeof raw2 !== "object") {
+    return {};
+  }
+  const record2 = raw2;
+  const wrapped = record2.mcpServers;
+  if (wrapped && typeof wrapped === "object" && !Array.isArray(wrapped)) {
+    return wrapped[key] ?? {};
+  }
+  return record2[key] ?? {};
+}
+function transportFromClaude(entry) {
+  if (entry.url || entry.type === "http" || entry.type === "streamable-http" || entry.type === "sse") {
+    return { type: "http", url: entry.url ?? "" };
+  }
+  return {
+    type: "stdio",
+    command: entry.command ?? "node",
+    args: entry.args ?? [],
+    ...entry.env ? { env: entry.env } : {},
+    ...entry.cwd ? { cwd: entry.cwd } : {}
+  };
+}
+async function readOptionalJson(file) {
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+
+// src/paths.ts
+import { existsSync } from "node:fs";
+import path3 from "node:path";
+import { fileURLToPath } from "node:url";
+var HERE = path3.dirname(fileURLToPath(import.meta.url));
+function findMarketplaceRoot(start) {
+  let dir = path3.resolve(start);
+  for (; ; ) {
+    if (existsSync(path3.join(dir, ".claude-plugin", "marketplace.json"))) {
+      return dir;
+    }
+    const parent = path3.dirname(dir);
+    if (parent === dir) {
+      return void 0;
+    }
+    dir = parent;
+  }
+}
+function resolveRepoRoot() {
+  if (process.env.YARD_ROOT) {
+    return path3.resolve(process.env.YARD_ROOT);
+  }
+  const projectDir = process.env.CLAUDE_PROJECT_DIR;
+  if (projectDir) {
+    const fromProject = findMarketplaceRoot(projectDir);
+    if (fromProject) {
+      return fromProject;
+    }
+  }
+  return findMarketplaceRoot(process.cwd()) ?? findMarketplaceRoot(HERE) ?? process.cwd();
+}
+function resolvePublicDir(root) {
+  const yardPublic = path3.join(root, "plugins", "yard", "public");
+  if (existsSync(path3.join(yardPublic, "index.html"))) {
+    return yardPublic;
+  }
+  const beside = path3.resolve(HERE, "..", "public");
+  if (existsSync(path3.join(beside, "index.html"))) {
+    return beside;
+  }
+  return path3.join(root, "public");
+}
+var REPO_ROOT = resolveRepoRoot();
+var SERVER_DIR = path3.resolve(HERE, "..");
+var CLAUDE_MARKETPLACE = path3.join(REPO_ROOT, ".claude-plugin", "marketplace.json");
+var CODEX_MARKETPLACE = path3.join(REPO_ROOT, ".agents", "plugins", "marketplace.json");
+var CURSOR_MARKETPLACE = path3.join(REPO_ROOT, ".cursor-plugin", "marketplace.json");
+var PLUGINS_DIR = path3.join(REPO_ROOT, "plugins");
+var TEMPLATE_DIR = path3.join(REPO_ROOT, "templates", "plugin");
+var PUBLIC_DIR = resolvePublicDir(REPO_ROOT);
+var YARD_DIR = path3.join(REPO_ROOT, ".yard");
+var SESSION_FILE = path3.join(YARD_DIR, "state.json");
+var YARD_PLUGIN_DIR = path3.join(REPO_ROOT, "plugins", "yard");
+
+// src/scaffold.ts
+import { cp, readdir, readFile as readFile2, rename, stat, writeFile as writeFile2 } from "node:fs/promises";
+import path4 from "node:path";
+var NAME_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+async function createPlugin(input) {
+  const name = input.name.trim();
+  const description = input.description.trim();
+  if (!NAME_RE.test(name)) {
+    throw new Error("plugin name must be kebab-case");
+  }
+  if (!description) {
+    throw new Error("description is required");
+  }
+  const dest = path4.join(PLUGINS_DIR, name);
+  await cp(TEMPLATE_DIR, dest, { recursive: true, errorOnExist: true });
+  await replaceInTree(dest, { PLUGIN_NAME: name, PLUGIN_DESCRIPTION: description });
+  await rename(path4.join(dest, "skills", "PLUGIN_NAME"), path4.join(dest, "skills", name));
+  await addCatalogEntries(name, description);
+  return dest;
+}
+async function replaceInTree(root, vars) {
+  const walk2 = async (dir) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = path4.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk2(full);
+        continue;
+      }
+      if (!(await stat(full)).isFile()) {
+        continue;
+      }
+      const raw2 = await readFile2(full, "utf8");
+      let next = raw2;
+      for (const [key, value] of Object.entries(vars)) {
+        next = next.split(key).join(value);
+      }
+      if (next !== raw2) {
+        await writeFile2(full, next);
+      }
+    }
+  };
+  await walk2(root);
+}
+async function addCatalogEntries(name, description) {
+  const claude = JSON.parse(await readFile2(CLAUDE_MARKETPLACE, "utf8"));
+  const codex = JSON.parse(await readFile2(CODEX_MARKETPLACE, "utf8"));
+  const cursor = JSON.parse(await readFile2(CURSOR_MARKETPLACE, "utf8"));
+  let added = false;
+  if (!hasNamedPlugin(claude.plugins, name)) {
+    claude.plugins.push({
+      name,
+      source: `./plugins/${name}`,
+      description,
+      version: "0.1.0",
+      author: { name: "Ryan Yannelli", email: "ryanyannelli@gmail.com" },
+      category: "uncategorized",
+      tags: [name],
+      license: "MIT"
+    });
+    await writeFile2(CLAUDE_MARKETPLACE, `${JSON.stringify(claude, null, 2)}
+`);
+    added = true;
+  }
+  if (!hasNamedPlugin(codex.plugins, name)) {
+    codex.plugins.push({
+      name,
+      source: { source: "local", path: `./plugins/${name}` },
+      policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
+      category: "Productivity"
+    });
+    await writeFile2(CODEX_MARKETPLACE, `${JSON.stringify(codex, null, 2)}
+`);
+    added = true;
+  }
+  if (!hasNamedPlugin(cursor.plugins, name)) {
+    cursor.plugins.push({
+      name,
+      source: `./plugins/${name}`,
+      description,
+      version: "0.1.0",
+      category: "uncategorized",
+      tags: [name]
+    });
+    await writeFile2(CURSOR_MARKETPLACE, `${JSON.stringify(cursor, null, 2)}
+`);
+    added = true;
+  }
+  return added;
+}
+function hasNamedPlugin(plugins, name) {
+  return plugins.some((plugin) => plugin.name === name);
+}
+
+// src/adapt.ts
+var NAME_RE2 = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+var AUTHOR = {
+  name: "Ryan Yannelli",
+  email: "ryanyannelli@gmail.com",
+  url: "https://github.com/yannelli"
+};
+var CLAUDE_TO_CURSOR_EVENTS = {
+  SessionStart: "sessionStart",
+  SessionEnd: "sessionEnd",
+  UserPromptSubmit: "beforeSubmitPrompt",
+  PreToolUse: "preToolUse",
+  PostToolUse: "postToolUse",
+  PostToolUseFailure: "postToolUseFailure",
+  SubagentStart: "subagentStart",
+  SubagentStop: "subagentStop",
+  PreCompact: "preCompact",
+  Stop: "stop"
+};
+var SUPPORT_DIRS = ["scripts", "rules", "agents", "commands", "hooks"];
+var SUPPORT_FILES = [".mcp.json", "mcp.json", "README.md", "LICENSE"];
+var FORBIDDEN_AGENT_ENV = /* @__PURE__ */ new Set(["PLUGIN_ROOT", "PLUGIN_DATA"]);
+async function adaptPlugin(input) {
+  const source = path5.resolve(input.source);
+  if (!await exists(source)) {
+    throw new Error(`adapt source not found: ${source}`);
+  }
+  const discovered = await discover(source, input.name);
+  const dest = path5.resolve(input.dest ?? path5.join(PLUGINS_DIR, discovered.name));
+  const destExisted = await exists(dest);
+  const destIsPlugin = path5.resolve(dest) === path5.resolve(PLUGINS_DIR, discovered.name);
+  const wrote = [];
+  const skipped = [];
+  const notes = [];
+  if (path5.resolve(source) !== dest) {
+    await mkdir2(dest, { recursive: true });
+    await copySkills(source, dest, discovered.name, wrote, skipped, notes);
+    await copySupport(source, dest, wrote, skipped, notes);
+  } else {
+    notes.push("adapting in place");
+  }
+  await adaptHooks(source, dest, wrote, skipped, notes);
+  await adaptMcp(source, dest, wrote, skipped, notes);
+  const seed = await seedFrom(source, dest, discovered);
+  for (const [rel, body] of Object.entries(manifestsFor(seed))) {
+    await writeMissing(dest, rel, body, wrote, skipped);
+  }
+  const register2 = destIsPlugin && (input.register ?? !destExisted);
+  let registered = false;
+  if (register2) {
+    registered = await addCatalogEntries(seed.name, seed.description);
+    notes.push(
+      registered ? "registered in the three marketplace catalogs" : "already present in the marketplace catalogs"
+    );
+  } else if (input.register === true && !destIsPlugin) {
+    notes.push("skipped catalog registration because dest is not plugins/<name>");
+  }
+  return { dest, name: seed.name, wrote, skipped, notes, registered };
+}
+function kebabName(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function cursorHooksToClaude(raw2) {
+  const events = hookEvents(raw2);
+  const hooks = {};
+  const dropped = [];
+  for (const [event, entries] of Object.entries(events)) {
+    const mapped = Object.entries(CLAUDE_TO_CURSOR_EVENTS).find(([, cursor]) => cursor === event)?.[0];
+    if (!mapped) {
+      dropped.push(event);
+      continue;
+    }
+    const commands = entries.flatMap(extractCommands).map(toClaudeCommand).filter((command) => command.length > 0);
+    if (commands.length) {
+      hooks[mapped] = [{ hooks: commands.map((command) => ({ type: "command", command })) }];
+    }
+  }
+  return { hooks, dropped };
+}
+function claudeMcpToAgent(raw2) {
+  const servers = serverMap(raw2);
+  return {
+    $schema: AGENT_MCP_SCHEMA,
+    mcpServers: Object.fromEntries(Object.entries(servers).map(([key, entry]) => [key, toAgentEntry(entry)]))
+  };
+}
+function agentMcpToClaude(raw2) {
+  const servers = serverMap(raw2);
+  return {
+    mcpServers: Object.fromEntries(
+      Object.entries(servers).map(([key, entry]) => {
+        const record2 = entry;
+        if (typeof record2.url === "string" && record2.url) {
+          return [key, { url: record2.url, type: String(record2.type ?? "http") }];
+        }
+        const args = Array.isArray(record2.args) ? record2.args.map((arg) => toClaudePath(String(arg))) : [];
+        const env = claudeEnv(record2.env);
+        return [
+          key,
+          {
+            command: typeof record2.command === "string" ? record2.command : "node",
+            args,
+            ...env ? { env } : {}
+          }
+        ];
+      })
+    )
+  };
+}
+async function discover(source, explicit) {
+  const skill = await findSkillFile(source);
+  const claude = await readJson(path5.join(dirOf(source), ".claude-plugin", "plugin.json"));
+  const rootManifest = await readJson(path5.join(dirOf(source), "plugin.json"));
+  const fromSkill = skill ? parseFrontmatter(await readFile3(skill, "utf8")).data : {};
+  const rawName = explicit ?? stringField(claude, "name") ?? stringField(rootManifest, "name") ?? fromSkill.name ?? path5.basename(skill ? path5.dirname(skill) : dirOf(source), ".md");
+  const name = kebabName(rawName);
+  if (!NAME_RE2.test(name)) {
+    throw new Error(`could not derive a kebab-case plugin name from ${source}`);
+  }
+  const description = stringField(claude, "description") ?? stringField(rootManifest, "description") ?? fromSkill.description ?? `${name} adapted from a Claude skill`;
+  return { name, description };
+}
+async function seedFrom(source, dest, discovered) {
+  const claude = await readJson(path5.join(dirOf(source), ".claude-plugin", "plugin.json")) ?? await readJson(path5.join(dest, ".claude-plugin", "plugin.json"));
+  const keywords = arrayField(claude, "keywords");
+  const declaredHooks = stringField(claude, "hooks");
+  const hooksPath = declaredHooks && !/^\.\/hooks\/(hooks|claude-hooks)\.json$/.test(declaredHooks) ? declaredHooks : void 0;
+  const homepage = stringField(claude, "homepage");
+  const repository = stringField(claude, "repository");
+  const mcp = await readJson(path5.join(dest, ".mcp.json")) ?? await readJson(path5.join(dest, "mcp.json")) ?? (claude && "mcpServers" in claude ? { mcpServers: claude.mcpServers } : void 0);
+  const hasMcp = Boolean(mcp && Object.keys(serverMap(mcp)).length);
+  return {
+    name: discovered.name,
+    description: discovered.description,
+    version: stringField(claude, "version") ?? "0.1.0",
+    keywords: keywords.length ? keywords : [discovered.name],
+    license: stringField(claude, "license") ?? "MIT",
+    ...homepage ? { homepage } : {},
+    ...repository ? { repository } : {},
+    ...hooksPath ? { hooks: hooksPath } : {},
+    ...hasMcp ? { cursorMcp: toCursorInline(mcp) } : {}
+  };
+}
+function manifestsFor(seed) {
+  const shared = {
+    name: seed.name,
+    version: seed.version,
+    description: seed.description,
+    author: AUTHOR,
+    homepage: seed.homepage ?? "https://github.com/yannelli/skills",
+    repository: seed.repository ?? "https://github.com/yannelli/skills",
+    license: seed.license,
+    keywords: seed.keywords
+  };
+  const claude = {
+    $schema: "https://json.schemastore.org/claude-code-plugin-manifest.json",
+    ...shared,
+    ...seed.hooks ? { hooks: seed.hooks } : {}
+  };
+  const agent = {
+    $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+    ...shared
+  };
+  const cursor = {
+    name: shared.name,
+    description: shared.description,
+    version: shared.version,
+    author: { name: AUTHOR.name, email: AUTHOR.email },
+    homepage: shared.homepage,
+    repository: shared.repository,
+    license: shared.license,
+    keywords: shared.keywords,
+    skills: "./skills/",
+    ...seed.hooks ? { hooks: seed.hooks } : {},
+    ...seed.cursorMcp ? { mcpServers: seed.cursorMcp } : {}
+  };
+  const codex = {
+    ...shared,
+    skills: "./skills/",
+    ...seed.hooks ? { hooks: seed.hooks } : {},
+    ...seed.cursorMcp ? { mcpServers: "./.mcp.json" } : {}
+  };
+  return {
+    "plugin.json": json(agent),
+    ".claude-plugin/plugin.json": json(claude),
+    ".codex-plugin/plugin.json": json(codex),
+    ".cursor-plugin/plugin.json": json(cursor)
+  };
+}
+async function copySkills(source, dest, name, wrote, skipped, notes) {
+  const destSkills = path5.join(dest, "skills");
+  if (await isDir(destSkills)) {
+    skipped.push("skills/");
+    return;
+  }
+  const sourceDir = dirOf(source);
+  const skillsDir = path5.join(sourceDir, "skills");
+  if (await isDir(skillsDir)) {
+    await cp2(skillsDir, destSkills, { recursive: true });
+    wrote.push("skills/");
+    notes.push("copied skills/ from the source plugin");
+    return;
+  }
+  const skill = await findSkillFile(source);
+  if (!skill) {
+    throw new Error(`no SKILL.md found under ${source}`);
+  }
+  const target = path5.join(dest, "skills", name, "SKILL.md");
+  await mkdir2(path5.dirname(target), { recursive: true });
+  await cp2(skill, target);
+  wrote.push(`skills/${name}/SKILL.md`);
+}
+async function copySupport(source, dest, wrote, skipped, notes) {
+  const sourceDir = dirOf(source);
+  if (!await looksLikePlugin(sourceDir)) {
+    return;
+  }
+  for (const dir of SUPPORT_DIRS) {
+    const from = path5.join(sourceDir, dir);
+    const to = path5.join(dest, dir);
+    if (!await isDir(from)) {
+      continue;
+    }
+    if (await exists(to)) {
+      skipped.push(`${dir}/`);
+      continue;
+    }
+    await cp2(from, to, { recursive: true });
+    wrote.push(`${dir}/`);
+  }
+  for (const file of SUPPORT_FILES) {
+    const from = path5.join(sourceDir, file);
+    if (await isFile(from)) {
+      await writeMissing(dest, file, await readFile3(from, "utf8"), wrote, skipped);
+    }
+  }
+  if (wrote.some((item) => SUPPORT_DIRS.includes(item.replace(/\/$/, "")))) {
+    notes.push("copied scripts, hooks, and other plugin support files");
+  }
+}
+async function adaptHooks(source, dest, wrote, skipped, notes) {
+  const sourceDir = dirOf(source);
+  const destHooks = path5.join(dest, "hooks", "hooks.json");
+  const legacySplit = path5.join(dest, "hooks", "claude-hooks.json");
+  const claudeRaw = await firstClaudeHooks([
+    path5.join(sourceDir, "hooks", "hooks.json"),
+    path5.join(sourceDir, "hooks", "claude-hooks.json"),
+    path5.join(sourceDir, ".claude-plugin", "hooks.json"),
+    destHooks,
+    legacySplit
+  ]);
+  if (claudeRaw) {
+    if (await isClaudeNamedHooks(destHooks)) {
+      skipped.push("hooks/hooks.json");
+    } else {
+      await mkdir2(path5.dirname(destHooks), { recursive: true });
+      await writeFile3(destHooks, json(claudeRaw));
+      wrote.push("hooks/hooks.json");
+      notes.push("wrote plugin hooks in the PascalCase shape every client reads");
+    }
+    if (await exists(legacySplit)) {
+      await rm(legacySplit);
+      notes.push("removed hooks/claude-hooks.json \u2014 plugin hooks are a single hooks/hooks.json");
+    }
+    return;
+  }
+  const cursorRaw = await firstCursorHooks([path5.join(sourceDir, "hooks", "hooks.json"), destHooks]);
+  if (cursorRaw) {
+    const { hooks, dropped } = cursorHooksToClaude(cursorRaw);
+    await mkdir2(path5.dirname(destHooks), { recursive: true });
+    await writeFile3(destHooks, json({ hooks }));
+    wrote.push("hooks/hooks.json");
+    notes.push("converted camelCase hooks to the PascalCase plugin shape");
+    if (dropped.length) {
+      notes.push(`dropped Cursor-only hook events with no plugin equivalent: ${dropped.join(", ")}`);
+    }
+  }
+}
+async function adaptMcp(source, dest, wrote, skipped, notes) {
+  const sourceDir = dirOf(source);
+  const sourceClaude = await readJson(path5.join(sourceDir, ".mcp.json"));
+  const sourceAgent = await readJson(path5.join(sourceDir, "mcp.json"));
+  const destClaudePath = path5.join(dest, ".mcp.json");
+  const destAgentPath = path5.join(dest, "mcp.json");
+  const destClaude = await readJson(destClaudePath);
+  const destAgent = await readJson(destAgentPath);
+  const pluginMcp = await pluginInlineMcp(sourceDir);
+  const claudeRaw = sourceClaude ?? destClaude ?? (isClaudeMcpShape(sourceAgent) ? sourceAgent : void 0) ?? pluginMcp;
+  const agentRaw = isAgentMcpShape(sourceAgent) ? sourceAgent : isAgentMcpShape(destAgent) ? destAgent : void 0;
+  if (claudeRaw && await isClaudeNamedMcp(destAgentPath)) {
+    await writeMissing(dest, ".mcp.json", json(normalizeClaudeMcp(claudeRaw)), wrote, skipped);
+    await writeFile3(destAgentPath, json(claudeMcpToAgent(claudeRaw)));
+    wrote.push("mcp.json");
+    notes.push("moved Claude-shaped mcp.json to .mcp.json and wrote Agent Plugins mcp.json");
+    return;
+  }
+  if (claudeRaw) {
+    await writeMissing(dest, "mcp.json", json(claudeMcpToAgent(claudeRaw)), wrote, skipped);
+    if (!await exists(destClaudePath)) {
+      await writeMissing(dest, ".mcp.json", json(normalizeClaudeMcp(claudeRaw)), wrote, skipped);
+    }
+    if (wrote.includes("mcp.json")) {
+      notes.push("wrote Agent Plugins mcp.json from Claude MCP");
+    }
+  }
+  if (agentRaw && !await exists(destClaudePath)) {
+    await writeMissing(dest, ".mcp.json", json(agentMcpToClaude(agentRaw)), wrote, skipped);
+    notes.push("wrote Claude .mcp.json from mcp.json");
+  }
+}
+async function findSkillFile(source) {
+  if (await isFile(source) && path5.basename(source) === "SKILL.md") {
+    return source;
+  }
+  const root = dirOf(source);
+  const direct = path5.join(root, "SKILL.md");
+  if (await isFile(direct)) {
+    return direct;
+  }
+  const skills = path5.join(root, "skills");
+  if (!await isDir(skills)) {
+    return void 0;
+  }
+  for (const entry of await readdir2(skills, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const file = path5.join(skills, entry.name, "SKILL.md");
+    if (await isFile(file)) {
+      return file;
+    }
+  }
+  return void 0;
+}
+async function writeMissing(dest, rel, body, wrote, skipped) {
+  const file = path5.join(dest, rel);
+  if (await exists(file)) {
+    skipped.push(rel);
+    return;
+  }
+  await mkdir2(path5.dirname(file), { recursive: true });
+  await writeFile3(file, body);
+  wrote.push(rel);
+}
+function hookEvents(raw2) {
+  if (!raw2 || typeof raw2 !== "object") {
+    return {};
+  }
+  const record2 = raw2;
+  const hooks = record2.hooks;
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(hooks).map(([key, value]) => [key, Array.isArray(value) ? value : []])
+  );
+}
+function isClaudeHookShape(raw2) {
+  return Object.keys(hookEvents(raw2)).some((key) => key[0] === key[0]?.toUpperCase());
+}
+function extractCommands(entry) {
+  if (!entry || typeof entry !== "object") {
+    return [];
+  }
+  const record2 = entry;
+  if (typeof record2.command === "string") {
+    return [record2.command];
+  }
+  const nested = record2.hooks;
+  if (!Array.isArray(nested)) {
+    return [];
+  }
+  return nested.flatMap((item) => extractCommands(item));
+}
+function toCursorCommand(command) {
+  return command.replaceAll('"${CLAUDE_PLUGIN_ROOT}"/', "./").replaceAll("${CLAUDE_PLUGIN_ROOT}/", "./").replaceAll('"${CLAUDE_PLUGIN_ROOT}"', ".").replaceAll("${CLAUDE_PLUGIN_ROOT}", ".");
+}
+function toClaudeCommand(command) {
+  if (command.startsWith("./")) {
+    return `"\${CLAUDE_PLUGIN_ROOT}"/${command.slice(2)}`;
+  }
+  return command;
+}
+function toClaudePath(value) {
+  if (value.startsWith("./")) {
+    return `\${CLAUDE_PLUGIN_ROOT}/${value.slice(2)}`;
+  }
+  return value;
+}
+function toAgentEntry(entry) {
+  const record2 = entry && typeof entry === "object" ? entry : {};
+  if (typeof record2.url === "string" && record2.url) {
+    const type = record2.type === "sse" ? "sse" : "streamable-http";
+    return { type, url: record2.url };
+  }
+  const args = Array.isArray(record2.args) ? record2.args.map((arg) => toCursorCommand(String(arg))) : [];
+  const env = agentEnv(record2.env);
+  return {
+    type: "stdio",
+    command: typeof record2.command === "string" ? record2.command : "node",
+    args,
+    cwd: "./",
+    ...env ? { env } : {}
+  };
+}
+function toCursorInline(raw2) {
+  const servers = serverMap(raw2);
+  return Object.fromEntries(
+    Object.entries(servers).map(([key, entry]) => {
+      const agent = toAgentEntry(entry);
+      if (agent.url) {
+        return [key, { type: agent.type, url: agent.url }];
+      }
+      return [key, { command: agent.command, args: agent.args }];
+    })
+  );
+}
+function normalizeClaudeMcp(raw2) {
+  if (isAgentMcpShape(raw2)) {
+    return agentMcpToClaude(raw2);
+  }
+  const servers = serverMap(raw2);
+  return { mcpServers: servers };
+}
+function serverMap(raw2) {
+  if (!raw2 || typeof raw2 !== "object") {
+    return {};
+  }
+  const record2 = raw2;
+  const wrapped = record2.mcpServers;
+  if (wrapped && typeof wrapped === "object" && !Array.isArray(wrapped)) {
+    return wrapped;
+  }
+  return Object.fromEntries(Object.entries(record2).filter(([key]) => key !== "$schema"));
+}
+function isAgentMcpShape(raw2) {
+  return Boolean(raw2 && typeof raw2 === "object" && "$schema" in raw2);
+}
+function isClaudeMcpShape(raw2) {
+  if (!raw2 || typeof raw2 !== "object" || isAgentMcpShape(raw2)) {
+    return false;
+  }
+  return JSON.stringify(raw2).includes("CLAUDE_PLUGIN_ROOT");
+}
+function agentEnv(value) {
+  if (!isStringRecord(value)) {
+    return void 0;
+  }
+  const next = Object.fromEntries(
+    Object.entries(value).filter(([key, item]) => {
+      if (FORBIDDEN_AGENT_ENV.has(key)) {
+        return false;
+      }
+      return !item.includes("CLAUDE_PLUGIN_ROOT") && !item.includes("CLAUDE_PROJECT_DIR");
+    })
+  );
+  return Object.keys(next).length ? next : void 0;
+}
+function claudeEnv(value) {
+  return isStringRecord(value) && Object.keys(value).length ? value : void 0;
+}
+function stringField(raw2, key) {
+  if (!raw2 || typeof raw2 !== "object") {
+    return void 0;
+  }
+  const value = raw2[key];
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function arrayField(raw2, key) {
+  if (!raw2 || typeof raw2 !== "object") {
+    return [];
+  }
+  const value = raw2[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item) => typeof item === "string");
+}
+function isStringRecord(value) {
+  return Boolean(
+    value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every((item) => typeof item === "string")
+  );
+}
+function json(value) {
+  return `${JSON.stringify(value, null, 2)}
+`;
+}
+function dirOf(source) {
+  return source.endsWith(".md") ? path5.dirname(source) : source;
+}
+async function firstClaudeHooks(files) {
+  for (const file of files) {
+    const parsed = await readJson(file);
+    if (parsed && isClaudeHookShape(parsed)) {
+      return parsed;
+    }
+  }
+  return void 0;
+}
+async function firstCursorHooks(files) {
+  for (const file of files) {
+    const parsed = await readJson(file);
+    if (parsed && !isClaudeHookShape(parsed) && Object.keys(hookEvents(parsed)).length) {
+      return parsed;
+    }
+  }
+  return void 0;
+}
+async function isClaudeNamedHooks(file) {
+  const parsed = await readJson(file);
+  return Boolean(parsed && isClaudeHookShape(parsed));
+}
+async function isClaudeNamedMcp(file) {
+  return isClaudeMcpShape(await readJson(file));
+}
+async function pluginInlineMcp(dir) {
+  const claude = await readJson(path5.join(dir, ".claude-plugin", "plugin.json"));
+  if (claude && "mcpServers" in claude) {
+    return { mcpServers: claude.mcpServers };
+  }
+  return void 0;
+}
+async function looksLikePlugin(dir) {
+  return await isFile(path5.join(dir, ".claude-plugin", "plugin.json")) || await isFile(path5.join(dir, "plugin.json")) || await isDir(path5.join(dir, "skills"));
+}
+async function readJson(file) {
+  try {
+    return JSON.parse(await readFile3(file, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+async function exists(target) {
+  try {
+    await stat2(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function isFile(target) {
+  try {
+    return (await stat2(target)).isFile();
+  } catch {
+    return false;
+  }
+}
+async function isDir(target) {
+  try {
+    return (await stat2(target)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+// src/cli/adapt.ts
+var ADAPT_USAGE = "usage: yard --adapt <path> [--name=] [--dest=] [--register|--no-register]";
+async function runAdapt(options) {
+  if (!options.source) {
+    throw new CliError(ADAPT_USAGE);
+  }
+  const report = await adaptPlugin({
+    source: options.source,
+    ...options.name ? { name: options.name } : {},
+    ...options.dest ? { dest: options.dest } : {},
+    ...options.register !== void 0 ? { register: options.register } : {}
+  });
+  console.log(JSON.stringify(report, null, 2));
+  return 0;
+}
+async function runAdaptCommand(args) {
+  rejectUnknownFlags(args, [...GLOBAL_FLAGS, "name", "dest", "register", "no-register"]);
+  const [source, extra] = args.positionals;
+  if (extra !== void 0) {
+    throw new CliError(`unexpected argument "${extra}" \u2014 ${ADAPT_USAGE}`);
+  }
+  const name = flagString(args, "name");
+  const dest = flagString(args, "dest");
+  const register2 = args.flags.has("register") ? true : args.flags.has("no-register") ? false : void 0;
+  return runAdapt({
+    source: source ?? "",
+    ...name ? { name } : {},
+    ...dest ? { dest } : {},
+    ...register2 !== void 0 ? { register: register2 } : {}
+  });
+}
+
+// src/env/probe.ts
+import { spawn } from "node:child_process";
+
+// src/env/tokens.ts
+var SEGMENT = /\s*(?:[A-Za-z]+|\d+|[^\sA-Za-z\d]+)|\s+/g;
+function estimateTokens(text, kind = "prose") {
+  if (!text) {
+    return 0;
+  }
+  let total = 0;
+  for (const [segment] of text.matchAll(SEGMENT)) {
+    total += segmentTokens(segment);
+  }
+  const factor = kind === "prose" ? 1 : kind === "json" ? 0.92 : 0.96;
+  return Math.max(1, Math.round(total * factor));
+}
+function segmentTokens(segment) {
+  const body = segment.replace(/^\s+/, "");
+  const hadLeadingSpace = body.length !== segment.length;
+  if (!body) {
+    return Math.max(1, Math.ceil(segment.length / 8));
+  }
+  if (/^\d+$/.test(body)) {
+    return Math.ceil(body.length / 3);
+  }
+  if (/^[A-Za-z]+$/.test(body)) {
+    const pieces = body.split(/(?=[A-Z])/).filter(Boolean);
+    if (pieces.length > 1) {
+      return pieces.reduce((sum, piece) => sum + wordPieces(piece), 0);
+    }
+    return wordPieces(body, hadLeadingSpace);
+  }
+  return Math.max(1, Math.ceil(body.length / 1.8));
+}
+function wordPieces(word, hadLeadingSpace = false) {
+  const length = word.length;
+  if (length <= (hadLeadingSpace ? 7 : 6)) {
+    return 1;
+  }
+  return Math.ceil(length / 5);
+}
+function estimateJsonTokens(value) {
+  return estimateTokens(JSON.stringify(value) ?? "", "json");
+}
+function formatTokens(count) {
+  if (count < 1e3) {
+    return String(count);
+  }
+  if (count < 1e4) {
+    return `${(count / 1e3).toFixed(1)}k`;
+  }
+  return `${Math.round(count / 1e3)}k`;
+}
+
+// src/env/probe.ts
+var DEFAULT_TIMEOUT_MS = 1e4;
+var DEFAULT_CONCURRENCY = 4;
+var KILL_GRACE_MS = 2e3;
+var PROTOCOL_VERSION = "2025-06-18";
+var INITIALIZE_ID = 1;
+var TOOLS_LIST_ID = 2;
+var STDERR_LIMIT = 4e3;
+var STDOUT_LIMIT = 16 * 1024 * 1024;
+var KILL_GROUP = process.platform !== "win32";
+async function probeMcpServer(entry, opts = {}) {
+  const started = Date.now();
+  const timeoutMs = positiveOr(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
+  const outcome = await runProbe(entry, timeoutMs, opts.env).catch(
+    (error2) => ({ ok: false, error: messageOf(error2), tools: [] })
+  );
+  const totalTokens = outcome.tools.reduce((sum, tool) => sum + tool.tokens, 0);
+  return {
+    server: entry.name,
+    ok: outcome.ok,
+    durationMs: Date.now() - started,
+    tools: outcome.tools,
+    totalTokens,
+    ...outcome.error !== void 0 ? { error: outcome.error } : {},
+    ...outcome.serverInfo ? { serverInfo: outcome.serverInfo } : {}
+  };
+}
+async function probeAll(entries, opts = {}) {
+  const limit = Math.max(1, Math.trunc(positiveOr(opts.concurrency, DEFAULT_CONCURRENCY)));
+  const results = new Array(entries.length);
+  let cursor = 0;
+  const worker = async () => {
+    for (; ; ) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= entries.length) {
+        return;
+      }
+      const entry = entries[index];
+      if (!entry) {
+        results[index] = {
+          server: `entry ${index}`,
+          ok: false,
+          error: "missing entry",
+          durationMs: 0,
+          tools: [],
+          totalTokens: 0
+        };
+        continue;
+      }
+      results[index] = await probeMcpServer(entry, {
+        ...opts.timeoutMs !== void 0 ? { timeoutMs: opts.timeoutMs } : {}
+      }).catch((error2) => ({
+        server: entry.name,
+        ok: false,
+        error: messageOf(error2),
+        durationMs: 0,
+        tools: [],
+        totalTokens: 0
+      }));
+    }
+  };
+  const workers = Array.from({ length: Math.min(limit, entries.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+async function runProbe(entry, timeoutMs, envOverride) {
+  if (entry.transport !== "stdio") {
+    return { ok: false, error: "remote transports are not probed", tools: [] };
+  }
+  if (!entry.command) {
+    return { ok: false, error: "stdio server has no command", tools: [] };
+  }
+  const options = {
+    // Never 'inherit': a server that reads stdin would swallow the parent's.
+    stdio: ["pipe", "pipe", "pipe"],
+    // Its own process group, so the kill below reaps the whole tree. MCP
+    // servers are usually launched through `npx`/`uvx`, which fork the real
+    // server as a child; signalling only the launcher leaves that orphaned.
+    detached: KILL_GROUP,
+    ...entry.cwd ? { cwd: entry.cwd } : {},
+    env: { ...process.env, ...entry.env, ...envOverride }
+  };
+  let child;
+  try {
+    child = spawn(entry.command, entry.args ?? [], options);
+  } catch (error2) {
+    return { ok: false, error: messageOf(error2), tools: [] };
+  }
+  return converse(child, timeoutMs);
+}
+async function converse(child, timeoutMs) {
+  const waiters = /* @__PURE__ */ new Map();
+  let stderr = "";
+  let spawnError;
+  let exitCode = null;
+  let exitSignal = null;
+  child.stdin?.on("error", () => {
+  });
+  child.stderr?.on("error", () => {
+  });
+  child.stdout?.on("error", () => {
+  });
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk) => {
+    if (stderr.length < STDERR_LIMIT) {
+      stderr = (stderr + chunk).slice(0, STDERR_LIMIT);
+    }
+  });
+  let buffer = "";
+  let overflowed = false;
+  child.stdout?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk) => {
+    buffer += chunk;
+    let newline = buffer.indexOf("\n");
+    while (newline !== -1) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line) {
+        deliver(line, waiters);
+      }
+      newline = buffer.indexOf("\n");
+    }
+    if (buffer.length > STDOUT_LIMIT) {
+      overflowed = true;
+      buffer = "";
+    }
+  });
+  const exited = new Promise((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+  const closed = new Promise((resolve) => {
+    child.once("error", (error2) => {
+      spawnError ??= error2.message;
+      resolve();
+    });
+    child.once("close", (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
+      const tail = buffer.trim();
+      buffer = "";
+      if (tail) {
+        deliver(tail, waiters);
+      }
+      resolve();
+    });
+  });
+  const send = (message) => {
+    child.stdin?.write(`${JSON.stringify(message)}
+`);
+  };
+  const waitFor = (id) => new Promise((resolve) => {
+    waiters.set(id, resolve);
+  });
+  const conversation = (async () => {
+    const initPromise = waitFor(INITIALIZE_ID);
+    send({
+      jsonrpc: "2.0",
+      id: INITIALIZE_ID,
+      method: "initialize",
+      params: {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: "yard", version: "1.0.0" }
+      }
+    });
+    const init = await initPromise;
+    if (init.error) {
+      return { ok: false, error: `initialize failed: ${rpcErrorText(init.error)}`, tools: [] };
+    }
+    const listPromise = waitFor(TOOLS_LIST_ID);
+    send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    send({ jsonrpc: "2.0", id: TOOLS_LIST_ID, method: "tools/list", params: {} });
+    const listed = await listPromise;
+    const serverInfo = readServerInfo(init.result);
+    if (listed.error) {
+      return {
+        ok: false,
+        error: `tools/list failed: ${rpcErrorText(listed.error)}`,
+        tools: [],
+        ...serverInfo ? { serverInfo } : {}
+      };
+    }
+    return {
+      ok: true,
+      tools: readTools(listed.result),
+      ...serverInfo ? { serverInfo } : {}
+    };
+  })();
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+  });
+  const died = closed.then(() => "closed");
+  let raced;
+  try {
+    raced = await Promise.race([conversation, deadline, died]);
+  } finally {
+    clearTimeout(timer);
+    await terminate(child, exited);
+    release(child);
+  }
+  if (raced === "timeout") {
+    return { ok: false, error: withStderr(note(`timed out after ${timeoutMs}ms`, overflowed), stderr), tools: [] };
+  }
+  if (raced === "closed") {
+    const reason = spawnError ?? exitDescription(exitCode, exitSignal);
+    return { ok: false, error: withStderr(note(reason, overflowed), stderr), tools: [] };
+  }
+  if (!raced.ok && raced.error !== void 0) {
+    return { ...raced, error: withStderr(raced.error, stderr) };
+  }
+  return raced;
+}
+async function terminate(child, exited) {
+  const running = child.pid !== void 0 && child.exitCode === null && child.signalCode === null;
+  if (!running) {
+    await settleWithin(exited, KILL_GRACE_MS);
+    return;
+  }
+  child.stdin?.end();
+  killTree(child, "SIGTERM");
+  const hardKill = setTimeout(() => killTree(child, "SIGKILL"), KILL_GRACE_MS);
+  hardKill.unref();
+  try {
+    await settleWithin(exited, KILL_GRACE_MS * 2);
+  } finally {
+    clearTimeout(hardKill);
+  }
+}
+function release(child) {
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    try {
+      stream?.destroy();
+    } catch {
+    }
+  }
+  child.unref();
+}
+function killTree(child, signal) {
+  const pid = child.pid;
+  if (pid === void 0) {
+    return;
+  }
+  if (KILL_GROUP && pid > 1) {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+  }
+}
+async function settleWithin(promise, ms) {
+  let timer;
+  const bound = new Promise((resolve) => {
+    timer = setTimeout(resolve, ms);
+    timer.unref();
+  });
+  try {
+    await Promise.race([promise, bound]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function note(message, overflowed) {
+  return overflowed ? `${message} (discarded oversized stdout)` : message;
+}
+function positiveOr(value, fallback) {
+  return value !== void 0 && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+function deliver(line, waiters) {
+  let message;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (!isRecord(message)) {
+    return;
+  }
+  const id = correlationId(message.id);
+  if (id === void 0) {
+    return;
+  }
+  const waiter = waiters.get(id);
+  if (!waiter) {
+    return;
+  }
+  waiters.delete(id);
+  waiter(message);
+}
+function correlationId(value) {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === "string" && /^-?\d+$/.test(value)) {
+    return Number(value);
+  }
+  return void 0;
+}
+function readTools(result) {
+  if (!isRecord(result) || !Array.isArray(result.tools)) {
+    return [];
+  }
+  const tools = [];
+  for (const raw2 of result.tools) {
+    if (!isRecord(raw2) || typeof raw2.name !== "string") {
+      continue;
+    }
+    const name = raw2.name;
+    const description = typeof raw2.description === "string" ? raw2.description : "";
+    tools.push({ name, description, tokens: priceTool(name, description, raw2.inputSchema) });
+  }
+  return tools;
+}
+function priceTool(name, description, inputSchema) {
+  try {
+    return estimateJsonTokens({
+      name,
+      description,
+      ...inputSchema !== void 0 ? { inputSchema } : {}
+    });
+  } catch {
+    try {
+      return estimateJsonTokens({ name, description });
+    } catch {
+      return 0;
+    }
+  }
+}
+function readServerInfo(result) {
+  if (!isRecord(result) || !isRecord(result.serverInfo)) {
+    return void 0;
+  }
+  const info = result.serverInfo;
+  if (typeof info.name !== "string") {
+    return void 0;
+  }
+  return { name: info.name, version: typeof info.version === "string" ? info.version : "" };
+}
+function exitDescription(code, signal) {
+  if (signal) {
+    return `server exited on ${signal} before responding`;
+  }
+  if (code !== null) {
+    return `server exited with code ${code} before responding`;
+  }
+  return "server exited before responding";
+}
+function withStderr(message, stderr) {
+  const tail = stderr.trim().split("\n").slice(-5).join("\n").trim();
+  return tail ? `${message}: ${tail}` : message;
+}
+function rpcErrorText(error2) {
+  const text = typeof error2.message === "string" ? error2.message : JSON.stringify(error2);
+  return typeof error2.code === "number" ? `${text} (${error2.code})` : text;
+}
+function messageOf(error2) {
+  return error2 instanceof Error ? error2.message : String(error2);
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/env/context.ts
+var DEFAULT_MAX_DESC_CHARS = 1536;
+var UNPROBED_MCP_TOKENS = 1200;
+async function buildContextReport(inventory, options = {}) {
+  const maxDescChars = options.maxDescChars ?? DEFAULT_MAX_DESC_CHARS;
+  const lines = [];
+  const notes = [];
+  for (const skill of inventory.skills) {
+    if (skill.visibility === "off" || skill.visibility === "user-invocable-only") {
+      continue;
+    }
+    const description = skill.visibility === "name-only" ? "" : skill.description.slice(0, maxDescChars);
+    const tokens = estimateTokens(`${skill.qualifiedName}: ${description}`);
+    lines.push({
+      id: skill.id,
+      client: skill.client,
+      kind: "skill",
+      label: skill.qualifiedName,
+      tokens,
+      measured: true,
+      ...skill.description.length > maxDescChars ? { detail: `description truncated at ${maxDescChars} chars` } : {},
+      // A plugin skill cannot be switched off individually — Claude Code's
+      // skillOverrides deliberately does not apply to them — so the lever is
+      // the plugin. Saying so is more useful than leaving the row blank.
+      ...skill.scope === "plugin" && skill.plugin ? { remedy: `yard plugin disable ${skill.plugin}` } : skill.client === "claude" ? { remedy: `yard skill ${skill.qualifiedName} user-invocable-only` } : {}
+    });
+  }
+  const enabledServers = inventory.mcpServers.filter((server) => server.enabled);
+  let probes = [];
+  if (options.probe && enabledServers.length) {
+    probes = await probeAll(enabledServers, {
+      ...options.probeTimeoutMs !== void 0 ? { timeoutMs: options.probeTimeoutMs } : {}
+    });
+  }
+  for (const server of enabledServers) {
+    const probe = probes.find((result) => result.server === server.id);
+    if (probe?.ok) {
+      lines.push({
+        id: server.id,
+        client: server.client,
+        kind: "mcp",
+        label: server.name,
+        tokens: probe.totalTokens,
+        measured: true,
+        detail: `${probe.tools.length} tools`,
+        remedy: `yard mcp disable ${server.name}`
+      });
+      continue;
+    }
+    lines.push({
+      id: server.id,
+      client: server.client,
+      kind: "mcp",
+      label: server.name,
+      tokens: UNPROBED_MCP_TOKENS,
+      measured: false,
+      detail: probe?.error ?? (options.probe ? "probe failed" : "not probed \u2014 run with --probe for the real cost"),
+      remedy: `yard mcp disable ${server.name}`
+    });
+  }
+  if (!options.probe && enabledServers.length) {
+    notes.push(
+      `${enabledServers.length} MCP server(s) were estimated, not measured. Re-run with --probe to start them and read their real tool schemas.`
+    );
+  }
+  for (const agent of inventory.agents) {
+    lines.push({
+      id: agent.id,
+      client: agent.client,
+      kind: "agent",
+      label: agent.name,
+      tokens: estimateTokens(`${agent.name}: ${agent.description}`),
+      measured: true
+    });
+  }
+  for (const command of inventory.commands) {
+    lines.push({
+      id: command.id,
+      client: command.client,
+      kind: "command",
+      label: command.name,
+      tokens: estimateTokens(`${command.name}: ${command.description}`),
+      measured: true
+    });
+  }
+  for (const memory of inventory.memory) {
+    lines.push({
+      id: memory.id,
+      client: memory.client,
+      kind: "memory",
+      label: memory.name,
+      tokens: tokensFromBytes(memory.bytes),
+      measured: false,
+      detail: `${memory.bytes} bytes, loaded in full`
+    });
+  }
+  lines.sort((a, b) => b.tokens - a.tokens || a.id.localeCompare(b.id));
+  const byKind = { skill: 0, mcp: 0, agent: 0, command: 0, memory: 0 };
+  const byClient = {};
+  let total = 0;
+  for (const line of lines) {
+    byKind[line.kind] += line.tokens;
+    byClient[line.client] = (byClient[line.client] ?? 0) + line.tokens;
+    total += line.tokens;
+  }
+  return {
+    projectRoot: inventory.projectRoot,
+    clients: inventory.clients,
+    total,
+    byKind,
+    byClient,
+    lines,
+    probed: Boolean(options.probe),
+    notes
+  };
+}
+function tokensFromBytes(bytes) {
+  return Math.round(bytes / 4.1);
+}
+function topOffenders(report, limit = 10) {
+  return report.lines.filter((line) => line.remedy).slice(0, limit);
+}
+
+// src/env/claude.ts
+init_frontmatter();
+init_client_paths();
+init_skill_dirs();
+init_safe_io();
+import { mkdir as mkdir4, readFile as readFile5, readdir as readdir4, readlink, rename as rename3 } from "node:fs/promises";
+import path9 from "node:path";
+var CLAUDE_HOOK_EVENTS = [
+  "PreToolUse",
+  "PostToolUse",
+  "PostToolUseFailure",
+  "PostToolBatch",
+  "Notification",
+  "UserPromptSubmit",
+  "UserPromptExpansion",
+  "SessionStart",
+  "SessionEnd",
+  "Stop",
+  "StopFailure",
+  "SubagentStart",
+  "SubagentStop",
+  "PreCompact",
+  "PostCompact",
+  "PermissionRequest",
+  "PermissionDenied",
+  "Setup",
+  "TeammateIdle",
+  "TaskCreated",
+  "TaskCompleted",
+  "Elicitation",
+  "ElicitationResult",
+  "ConfigChange",
+  "WorktreeCreate",
+  "WorktreeRemove",
+  "InstructionsLoaded",
+  "CwdChanged",
+  "FileChanged"
+];
+var HOOK_EVENTS = new Set(CLAUDE_HOOK_EVENTS);
+var SKILL_LISTING_MAX_DESC_CHARS_DEFAULT = 1536;
+var SKILL_LISTING_BUDGET_FRACTION_DEFAULT = 0.01;
+function claudeSettingsFiles(projectRoot) {
+  const paths = claudePaths(projectRoot);
+  return [
+    { level: "user", scope: "user", file: paths.userSettings },
+    { level: "userLocal", scope: "local", file: paths.userLocalSettings },
+    { level: "project", scope: "project", file: paths.projectSettings },
+    { level: "projectLocal", scope: "local", file: paths.projectLocalSettings },
+    { level: "managed", scope: "builtin", file: paths.managedSettings }
+  ];
+}
+function claudeSettingsTarget(scope, projectRoot) {
+  const paths = claudePaths(projectRoot);
+  switch (scope) {
+    case "user":
+      return paths.userSettings;
+    case "project":
+      return paths.projectSettings;
+    case "local":
+      return paths.projectLocalSettings;
+    default: {
+      const exhaustive = scope;
+      throw new Error(`unknown settings scope: ${String(exhaustive)}`);
+    }
+  }
+}
+async function scanClaude(projectRoot) {
+  const paths = claudePaths(projectRoot);
+  const warnings = [];
+  const loaded = await loadSettings(projectRoot, warnings);
+  const global2 = await readGlobalConfig(paths.globalConfig, projectRoot, warnings);
+  const settings = mergeSettings(claudeSettingsFiles(projectRoot), loaded, global2, warnings);
+  const skills = [];
+  const plugins = [];
+  const mcpServers = [];
+  const hooks = [];
+  const agents = [];
+  const commands = [];
+  const memory = [];
+  const personal = /* @__PURE__ */ new Set();
+  skills.push(
+    ...await scanSkillDir(paths.userSkills, { scope: "user" }, settings, warnings, personal)
+  );
+  skills.push(
+    ...await scanSkillDir(
+      paths.userSkillsDisabled,
+      { scope: "user", disabled: true },
+      settings,
+      warnings,
+      personal
+    )
+  );
+  skills.push(
+    ...await scanSkillDir(paths.projectSkills, { scope: "project" }, settings, warnings)
+  );
+  agents.push(...await scanDocDir(paths.userAgents, "user", warnings));
+  agents.push(...await scanDocDir(paths.projectAgents, "project", warnings));
+  commands.push(...await scanDocDir(paths.userCommands, "user", warnings));
+  commands.push(...await scanDocDir(paths.projectCommands, "project", warnings));
+  hooks.push(...hooksFromSettings(loaded, settings, warnings));
+  mcpServers.push(...globalMcpServers(global2, settings, warnings));
+  mcpServers.push(...await scanProjectMcp(paths.projectMcp, settings, paths.globalConfig, warnings));
+  memory.push(...await scanMemory(paths, warnings));
+  const pluginScan = await scanPlugins(projectRoot, settings, warnings);
+  plugins.push(...pluginScan.plugins);
+  skills.push(...pluginScan.components.skills);
+  agents.push(...pluginScan.components.agents);
+  commands.push(...pluginScan.components.commands);
+  hooks.push(...pluginScan.components.hooks);
+  mcpServers.push(...pluginScan.components.mcpServers);
+  return {
+    installed: await isDir2(paths.dir),
+    skills,
+    plugins,
+    mcpServers,
+    hooks,
+    agents,
+    commands,
+    memory,
+    warnings,
+    settings
+  };
+}
+async function setSkillVisibility(opts) {
+  if (!SKILL_VISIBILITIES.includes(opts.visibility)) {
+    throw new Error(
+      `unknown skill visibility "${String(opts.visibility)}": expected one of ${SKILL_VISIBILITIES.join(", ")}`
+    );
+  }
+  const file = claudeSettingsTarget(opts.scope ?? "user", opts.projectRoot);
+  const settings = await readSettingsForWrite(file);
+  const overrides = { ...asRecord(settings.skillOverrides) ?? {} };
+  if (opts.visibility === "on") {
+    delete overrides[opts.skill];
+  } else {
+    overrides[opts.skill] = opts.visibility;
+  }
+  if (Object.keys(overrides).length === 0) {
+    delete settings.skillOverrides;
+  } else {
+    settings.skillOverrides = overrides;
+  }
+  return writeSettings(file, settings, opts.dryRun === true);
+}
+async function setPluginEnabled(opts) {
+  const key = await resolvePluginKey(opts.plugin, opts.projectRoot);
+  const file = claudeSettingsTarget(opts.scope ?? "user", opts.projectRoot);
+  const settings = await readSettingsForWrite(file);
+  const enabledPlugins = { ...asRecord(settings.enabledPlugins) ?? {} };
+  enabledPlugins[key] = opts.enabled;
+  settings.enabledPlugins = enabledPlugins;
+  return writeSettings(file, settings, opts.dryRun === true);
+}
+async function setMcpEnabled(opts) {
+  const file = claudeSettingsTarget(opts.scope ?? "user", opts.projectRoot);
+  const settings = await readSettingsForWrite(file);
+  const enabled = new Set(asStringArray(settings.enabledMcpjsonServers) ?? []);
+  const disabled = new Set(asStringArray(settings.disabledMcpjsonServers) ?? []);
+  enabled.delete(opts.server);
+  disabled.delete(opts.server);
+  (opts.enabled ? enabled : disabled).add(opts.server);
+  applyList(settings, "enabledMcpjsonServers", enabled);
+  applyList(settings, "disabledMcpjsonServers", disabled);
+  return writeSettings(file, settings, opts.dryRun === true);
+}
+async function setSkillDirectoryEnabled(opts) {
+  const paths = claudePaths(opts.projectRoot);
+  if (opts.skill.includes(":")) {
+    throw new Error(
+      `"${opts.skill}" is a plugin skill; disable its plugin with setPluginEnabled instead of moving directories`
+    );
+  }
+  if (opts.skill === "" || opts.skill.includes("/") || opts.skill.includes("\\") || opts.skill.startsWith(".")) {
+    throw new Error(`"${opts.skill}" is not a plain skill directory name`);
+  }
+  const enabledDir = path9.join(paths.userSkills, opts.skill);
+  const disabledDir = path9.join(paths.userSkillsDisabled, opts.skill);
+  const inEnabled = await isDir2(enabledDir);
+  const inDisabled = await isDir2(disabledDir);
+  if (inEnabled && inDisabled) {
+    throw new Error(
+      `"${opts.skill}" exists in both ${paths.userSkills} and ${paths.userSkillsDisabled}; resolve that by hand first`
+    );
+  }
+  if (!inEnabled && !inDisabled) {
+    const projectDir = path9.join(paths.projectSkills, opts.skill);
+    if (await isDir2(projectDir)) {
+      throw new Error(
+        `"${opts.skill}" is a project skill at ${projectDir}; only personal skills under ${paths.userSkills} can be moved`
+      );
+    }
+    throw new Error(
+      `no personal skill "${opts.skill}" under ${paths.userSkills} or ${paths.userSkillsDisabled}`
+    );
+  }
+  const from = opts.enabled ? disabledDir : enabledDir;
+  const to = opts.enabled ? enabledDir : disabledDir;
+  if (opts.enabled ? inEnabled : inDisabled) {
+    return { from: to, to, moved: false };
+  }
+  if (opts.dryRun) {
+    return { from, to, moved: false };
+  }
+  await mkdir4(path9.dirname(to), { recursive: true });
+  await rename3(from, to);
+  return { from, to, moved: true };
+}
+async function loadSettings(projectRoot, warnings) {
+  const loaded = [];
+  for (const source of claudeSettingsFiles(projectRoot)) {
+    const record2 = await readRecordFile(source.file, warnings);
+    if (record2) {
+      loaded.push({ source, value: record2 });
+    }
+  }
+  return loaded;
+}
+async function readGlobalConfig(file, projectRoot, warnings) {
+  const value = await readRecordFile(file, warnings);
+  if (!value) {
+    return { file };
+  }
+  const project = asRecord(asRecord(value.projects)?.[path9.resolve(projectRoot)]);
+  return { file, value, ...project ? { project } : {} };
+}
+async function readRecordFile(file, warnings) {
+  const result = await readJsonFile(file);
+  if (result.missing) {
+    return void 0;
+  }
+  if (result.error !== void 0) {
+    warnings.push({ client: "claude", file, message: result.error });
+    return void 0;
+  }
+  const record2 = asRecord(result.value);
+  if (!record2) {
+    warnings.push({ client: "claude", file, message: "expected a JSON object" });
+    return void 0;
+  }
+  return record2;
+}
+function mergeSettings(files, loaded, global2, warnings) {
+  const sources = {
+    skillOverrides: {},
+    enabledPlugins: {},
+    mcpjsonServers: {},
+    extraKnownMarketplaces: {}
+  };
+  const skillOverrides = {};
+  const enabledPlugins = {};
+  const mcpjsonServers = {};
+  const extraKnownMarketplaces = {};
+  let skillListingMaxDescChars = SKILL_LISTING_MAX_DESC_CHARS_DEFAULT;
+  let skillListingBudgetFraction = SKILL_LISTING_BUDGET_FRACTION_DEFAULT;
+  let disableAllHooks = false;
+  let disableBundledSkills = false;
+  let enableAllProjectMcpServers = false;
+  for (const { source, value } of loaded) {
+    const file = source.file;
+    for (const [skill, raw2] of Object.entries(asRecord(value.skillOverrides) ?? {})) {
+      if (isSkillVisibility(raw2)) {
+        skillOverrides[skill] = raw2;
+        sources.skillOverrides[skill] = file;
+      } else {
+        warnings.push({
+          client: "claude",
+          file,
+          message: `skillOverrides.${skill} is not a known visibility: ${JSON.stringify(raw2)}`
+        });
+      }
+    }
+    for (const [plugin, raw2] of Object.entries(asRecord(value.enabledPlugins) ?? {})) {
+      if (typeof raw2 === "boolean") {
+        enabledPlugins[plugin] = raw2;
+        sources.enabledPlugins[plugin] = file;
+      } else {
+        warnings.push({
+          client: "claude",
+          file,
+          message: `enabledPlugins["${plugin}"] is not a boolean`
+        });
+      }
+    }
+    for (const [id, raw2] of Object.entries(asRecord(value.extraKnownMarketplaces) ?? {})) {
+      const entry = asRecord(raw2);
+      if (entry) {
+        extraKnownMarketplaces[id] = entry;
+        sources.extraKnownMarketplaces[id] = file;
+      }
+    }
+    for (const name of asStringArray(value.enabledMcpjsonServers) ?? []) {
+      mcpjsonServers[name] = true;
+      sources.mcpjsonServers[name] = file;
+    }
+    for (const name of asStringArray(value.disabledMcpjsonServers) ?? []) {
+      mcpjsonServers[name] = false;
+      sources.mcpjsonServers[name] = file;
+    }
+    const maxDesc = value.skillListingMaxDescChars;
+    if (typeof maxDesc === "number" && Number.isFinite(maxDesc)) {
+      skillListingMaxDescChars = maxDesc;
+      sources.skillListingMaxDescChars = file;
+    }
+    const fraction = value.skillListingBudgetFraction;
+    if (typeof fraction === "number" && Number.isFinite(fraction)) {
+      skillListingBudgetFraction = fraction;
+      sources.skillListingBudgetFraction = file;
+    }
+    if (typeof value.disableAllHooks === "boolean") {
+      disableAllHooks = value.disableAllHooks;
+      sources.disableAllHooks = file;
+    }
+    if (typeof value.disableBundledSkills === "boolean") {
+      disableBundledSkills = value.disableBundledSkills;
+      sources.disableBundledSkills = file;
+    }
+    if (typeof value.enableAllProjectMcpServers === "boolean") {
+      enableAllProjectMcpServers = value.enableAllProjectMcpServers;
+      sources.enableAllProjectMcpServers = file;
+    }
+  }
+  const globalValue = global2.value;
+  if (typeof globalValue?.disableBundledSkills === "boolean") {
+    disableBundledSkills = globalValue.disableBundledSkills;
+    sources.disableBundledSkills = global2.file;
+  }
+  if (typeof globalValue?.enableAllProjectMcpServers === "boolean") {
+    enableAllProjectMcpServers = globalValue.enableAllProjectMcpServers;
+    sources.enableAllProjectMcpServers = global2.file;
+  }
+  for (const name of asStringArray(global2.project?.enabledMcpjsonServers) ?? []) {
+    mcpjsonServers[name] = true;
+    sources.mcpjsonServers[name] = global2.file;
+  }
+  for (const name of asStringArray(global2.project?.disabledMcpjsonServers) ?? []) {
+    mcpjsonServers[name] = false;
+    sources.mcpjsonServers[name] = global2.file;
+  }
+  const disabledMcpServers = asStringArray(global2.project?.disabledMcpServers) ?? [];
+  if (disabledMcpServers.length > 0) {
+    sources.disabledMcpServers = global2.file;
+  }
+  return {
+    files,
+    loaded: loaded.map((entry) => entry.source.file),
+    skillOverrides,
+    skillListingMaxDescChars,
+    skillListingBudgetFraction,
+    enabledPlugins,
+    mcpjsonServers,
+    enabledMcpjsonServers: Object.keys(mcpjsonServers).filter((name) => mcpjsonServers[name]).sort(),
+    disabledMcpjsonServers: Object.keys(mcpjsonServers).filter((name) => !mcpjsonServers[name]).sort(),
+    disabledMcpServers,
+    disableAllHooks,
+    disableBundledSkills,
+    extraKnownMarketplaces,
+    enableAllProjectMcpServers,
+    sources
+  };
+}
+async function scanSkillDir(dir, opts, settings, warnings, seen) {
+  const entries = [];
+  const skillDirs = opts.skillDirs ?? (await listChildDirs(dir, warnings)).map((name) => path9.join(dir, name));
+  for (const skillDir of skillDirs) {
+    const name = path9.basename(skillDir);
+    const file = path9.join(skillDir, "SKILL.md");
+    if (!await isFile2(file)) {
+      continue;
+    }
+    if (seen?.has(name)) {
+      warnings.push({
+        client: "claude",
+        file,
+        message: `duplicate skill "${name}"; the copy already found takes precedence`
+      });
+      continue;
+    }
+    seen?.add(name);
+    const raw2 = await readText(file);
+    if (raw2 === void 0) {
+      warnings.push({ client: "claude", file, message: "could not read SKILL.md" });
+      continue;
+    }
+    const { data } = parseFrontmatter(raw2);
+    const qualifiedName = opts.plugin ? `${opts.plugin}:${name}` : name;
+    const resolved = resolveVisibility(qualifiedName, name, opts, settings, skillDir);
+    entries.push({
+      id: `claude:${opts.scope}:${qualifiedName}`,
+      client: "claude",
+      scope: opts.scope,
+      name,
+      qualifiedName,
+      description: data.description ?? "",
+      file,
+      dir: skillDir,
+      ...opts.plugin ? { plugin: opts.plugin } : {},
+      visibility: resolved.visibility,
+      ...resolved.source ? { visibilitySource: resolved.source } : {},
+      frontmatter: data,
+      bytes: Buffer.byteLength(raw2, "utf8")
+    });
+  }
+  return entries;
+}
+function resolveVisibility(qualifiedName, name, opts, settings, skillDir) {
+  if (opts.disabled) {
+    return { visibility: "off", source: path9.dirname(skillDir) };
+  }
+  for (const key of opts.plugin ? [qualifiedName] : [name]) {
+    const override = settings.skillOverrides[key];
+    if (override) {
+      const source = settings.sources.skillOverrides[key];
+      return { visibility: override, ...source ? { source } : {} };
+    }
+  }
+  return { visibility: "on" };
+}
+async function scanDocDir(dir, scope, warnings, plugin) {
+  const entries = [];
+  for (const found of await collectMarkdown(dir, warnings)) {
+    const raw2 = await readText(found.file);
+    if (raw2 === void 0) {
+      warnings.push({ client: "claude", file: found.file, message: "could not read file" });
+      continue;
+    }
+    const { data } = parseFrontmatter(raw2);
+    entries.push({
+      id: `claude:${scope}:${plugin ? `${plugin}:` : ""}${found.name}`,
+      client: "claude",
+      scope,
+      name: found.name,
+      description: data.description ?? "",
+      file: found.file,
+      ...plugin ? { plugin } : {},
+      bytes: Buffer.byteLength(raw2, "utf8")
+    });
+  }
+  return entries;
+}
+async function collectMarkdown(dir, warnings, prefix = "", depth = 0) {
+  const found = [];
+  for (const name of await listChildFiles(dir, ".md", warnings)) {
+    found.push({ name: `${prefix}${name.slice(0, -".md".length)}`, file: path9.join(dir, name) });
+  }
+  if (depth < 2) {
+    for (const sub of await listChildDirs(dir, warnings)) {
+      found.push(
+        ...await collectMarkdown(path9.join(dir, sub), warnings, `${prefix}${sub}:`, depth + 1)
+      );
+    }
+  }
+  return found;
+}
+function hooksFromSettings(loaded, settings, warnings) {
+  const entries = [];
+  for (const { source, value } of loaded) {
+    const hooks = asRecord(value.hooks);
+    if (!hooks) {
+      continue;
+    }
+    for (const [event, groups] of Object.entries(hooks)) {
+      entries.push(
+        ...hooksFromEvent(event, groups, {
+          idPrefix: `claude:${source.level}`,
+          scope: source.scope,
+          file: source.file,
+          settings,
+          warnings
+        })
+      );
+    }
+  }
+  return entries;
+}
+function hooksFromEvent(event, groups, ctx) {
+  if (!HOOK_EVENTS.has(event)) {
+    ctx.warnings.push({
+      client: "claude",
+      file: ctx.file,
+      message: `unknown hook event "${event}"; Claude Code event names are PascalCase`
+    });
+  }
+  if (!Array.isArray(groups)) {
+    ctx.warnings.push({
+      client: "claude",
+      file: ctx.file,
+      message: `hooks.${event} is not an array`
+    });
+    return [];
+  }
+  const disabled = ctx.settings.disableAllHooks;
+  const disabledSource = ctx.settings.sources.disableAllHooks;
+  const entries = [];
+  let index = 0;
+  for (const rawGroup of groups) {
+    const group = asRecord(rawGroup);
+    if (!group) {
+      continue;
+    }
+    const matcher = typeof group.matcher === "string" ? group.matcher : void 0;
+    const inner = Array.isArray(group.hooks) ? group.hooks : [];
+    for (const rawHook of inner) {
+      const hook = asRecord(rawHook);
+      if (!hook) {
+        continue;
+      }
+      const command = typeof hook.command === "string" ? hook.command : void 0;
+      if (command === void 0) {
+        ctx.warnings.push({
+          client: "claude",
+          file: ctx.file,
+          message: `hooks.${event}[${index}] has no command`
+        });
+        continue;
+      }
+      const enabled = !disabled && ctx.pluginEnabled !== false;
+      const enabledSource = disabled ? disabledSource : ctx.pluginEnabledSource;
+      entries.push({
+        id: `${ctx.idPrefix}:${event}:${index}`,
+        client: "claude",
+        scope: ctx.scope,
+        event,
+        ...matcher !== void 0 ? { matcher } : {},
+        type: hook.type === "prompt" ? "prompt" : "command",
+        command,
+        ...typeof hook.timeout === "number" ? { timeout: hook.timeout } : {},
+        file: ctx.file,
+        ...ctx.plugin ? { plugin: ctx.plugin } : {},
+        enabled,
+        ...enabledSource ? { enabledSource } : {},
+        index
+      });
+      index += 1;
+    }
+  }
+  return entries;
+}
+async function scanProjectMcp(file, settings, globalFile, warnings) {
+  const servers = await readMcpFile(file, warnings);
+  const entries = [];
+  for (const [name, raw2] of Object.entries(servers)) {
+    const approved = settings.mcpjsonServers[name];
+    const source = approved !== void 0 ? settings.sources.mcpjsonServers[name] : settings.enableAllProjectMcpServers ? globalFile : void 0;
+    const decided = applyMcpSwitch(name, settings, {
+      enabled: approved ?? settings.enableAllProjectMcpServers,
+      ...source ? { source } : {}
+    });
+    const entry = toMcpEntry(name, raw2, {
+      id: `claude:project:${name}`,
+      scope: "project",
+      file,
+      enabled: decided.enabled,
+      ...decided.source ? { enabledSource: decided.source } : {},
+      warnings
+    });
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+  return entries;
+}
+function globalMcpServers(global2, settings, warnings) {
+  const entries = [];
+  const layers = [
+    { scope: "local", servers: asRecord(global2.project?.mcpServers) },
+    { scope: "user", servers: asRecord(global2.value?.mcpServers) }
+  ];
+  const claimed = /* @__PURE__ */ new Set();
+  for (const layer of layers) {
+    for (const [name, raw2] of Object.entries(layer.servers ?? {})) {
+      if (claimed.has(name)) {
+        continue;
+      }
+      const decided = applyMcpSwitch(name, settings, { enabled: true });
+      const entry = toMcpEntry(name, raw2, {
+        id: `claude:${layer.scope}:${name}`,
+        scope: layer.scope,
+        file: global2.file,
+        enabled: decided.enabled,
+        ...decided.source ? { enabledSource: decided.source } : {},
+        warnings
+      });
+      if (entry) {
+        claimed.add(name);
+        entries.push(entry);
+      }
+    }
+  }
+  return entries;
+}
+function applyMcpSwitch(key, settings, fallback) {
+  if (settings.disabledMcpServers.includes(key)) {
+    const source = settings.sources.disabledMcpServers;
+    return { enabled: false, ...source ? { source } : {} };
+  }
+  return fallback;
+}
+async function readMcpFile(file, warnings, opts = {}) {
+  const result = await readJsonFile(file);
+  if (result.missing) {
+    return {};
+  }
+  if (result.error !== void 0) {
+    warnings.push({ client: "claude", file, message: result.error });
+    return {};
+  }
+  const record2 = asRecord(result.value);
+  const servers = asRecord(record2?.mcpServers);
+  if (servers) {
+    return servers;
+  }
+  if (opts.allowBareMap && record2 && isServerMap(record2)) {
+    return record2;
+  }
+  warnings.push({ client: "claude", file, message: "expected an object with an mcpServers key" });
+  return {};
+}
+function isServerMap(record2) {
+  const entries = Object.entries(record2);
+  if (entries.length === 0) {
+    return false;
+  }
+  return entries.every(([, value]) => {
+    const server = asRecord(value);
+    return server !== void 0 && (typeof server.command === "string" || typeof server.url === "string");
+  });
+}
+function toMcpEntry(name, raw2, ctx) {
+  const entry = asRecord(raw2);
+  if (!entry) {
+    ctx.warnings.push({ client: "claude", file: ctx.file, message: `server "${name}" is not an object` });
+    return void 0;
+  }
+  const declared = typeof entry.type === "string" ? entry.type : void 0;
+  const command = typeof entry.command === "string" ? entry.command : void 0;
+  const url2 = typeof entry.url === "string" ? entry.url : void 0;
+  let transport;
+  if (declared !== void 0 && isTransport(declared)) {
+    transport = declared;
+  } else {
+    if (declared !== void 0) {
+      ctx.warnings.push({
+        client: "claude",
+        file: ctx.file,
+        message: `server "${name}" has unknown type "${declared}"`
+      });
+    }
+    transport = command === void 0 && url2 !== void 0 ? "http" : "stdio";
+  }
+  return {
+    id: ctx.id,
+    client: "claude",
+    scope: ctx.scope,
+    name,
+    transport,
+    ...command !== void 0 ? { command } : {},
+    ...asStringArray(entry.args) ? { args: asStringArray(entry.args) } : {},
+    ...asStringRecord(entry.env) ? { env: asStringRecord(entry.env) } : {},
+    ...typeof entry.cwd === "string" ? { cwd: entry.cwd } : {},
+    ...url2 !== void 0 ? { url: url2 } : {},
+    ...asStringRecord(entry.headers) ? { headers: asStringRecord(entry.headers) } : {},
+    file: ctx.file,
+    ...ctx.plugin ? { plugin: ctx.plugin } : {},
+    enabled: ctx.enabled,
+    ...ctx.enabledSource ? { enabledSource: ctx.enabledSource } : {}
+  };
+}
+async function scanMemory(paths, warnings) {
+  const entries = [];
+  const candidates = [
+    { scope: "user", file: paths.userMemory },
+    { scope: "project", file: paths.projectMemory }
+  ];
+  for (const name of await listChildFiles(paths.userRules, ".md", warnings)) {
+    candidates.push({ scope: "user", file: path9.join(paths.userRules, name) });
+  }
+  for (const candidate of candidates) {
+    if (!await isFile2(candidate.file)) {
+      continue;
+    }
+    const raw2 = await readText(candidate.file);
+    if (raw2 === void 0) {
+      warnings.push({ client: "claude", file: candidate.file, message: "could not read file" });
+      continue;
+    }
+    entries.push({
+      id: `claude:${candidate.scope}:${candidate.file}`,
+      client: "claude",
+      scope: candidate.scope,
+      name: path9.basename(candidate.file),
+      file: candidate.file,
+      bytes: Buffer.byteLength(raw2, "utf8")
+    });
+  }
+  return entries;
+}
+async function scanPlugins(projectRoot, settings, warnings) {
+  const paths = claudePaths(projectRoot);
+  const components = {
+    skills: [],
+    agents: [],
+    commands: [],
+    hooks: [],
+    mcpServers: []
+  };
+  const plugins = [];
+  const installedFile = await readJsonFile(paths.installedPlugins);
+  if (installedFile.error !== void 0) {
+    warnings.push({
+      client: "claude",
+      file: paths.installedPlugins,
+      message: installedFile.error
+    });
+  }
+  const installedRecord = asRecord(asRecord(installedFile.value)?.plugins) ?? {};
+  const marketplacesFile = await readJsonFile(paths.knownMarketplaces);
+  if (marketplacesFile.error !== void 0) {
+    warnings.push({
+      client: "claude",
+      file: paths.knownMarketplaces,
+      message: marketplacesFile.error
+    });
+  }
+  const marketplaces = asRecord(marketplacesFile.value) ?? {};
+  const seen = /* @__PURE__ */ new Set();
+  for (const [key, raw2] of Object.entries(installedRecord)) {
+    if (!Array.isArray(raw2)) {
+      warnings.push({
+        client: "claude",
+        file: paths.installedPlugins,
+        message: `plugins["${key}"] is not an array of installs`
+      });
+      continue;
+    }
+    seen.add(key);
+    const { name, marketplace } = splitPluginKey(key);
+    const enabled = settings.enabledPlugins[key] ?? false;
+    const enabledSource = settings.sources.enabledPlugins[key];
+    for (const rawInstall of raw2) {
+      const install = asRecord(rawInstall);
+      if (!install) {
+        continue;
+      }
+      const scope = toScope(install.scope);
+      const root = typeof install.installPath === "string" ? install.installPath : void 0;
+      const manifest = root ? await readManifest(path9.join(root, ".claude-plugin", "plugin.json"), warnings) : void 0;
+      const discovered = root ? await discoverPluginComponents(
+        root,
+        {
+          plugin: name,
+          enabled,
+          ...enabledSource ? { enabledSource } : {},
+          ...manifest?.skills !== void 0 ? { declaredSkills: manifest.skills } : {}
+        },
+        settings,
+        warnings
+      ) : emptyComponents();
+      components.skills.push(...discovered.skills);
+      components.agents.push(...discovered.agents);
+      components.commands.push(...discovered.commands);
+      components.hooks.push(...discovered.hooks);
+      components.mcpServers.push(...discovered.mcpServers);
+      plugins.push({
+        id: `claude:${scope}:${key}`,
+        client: "claude",
+        scope,
+        name,
+        ...marketplace ? { marketplace } : {},
+        qualifiedName: key,
+        description: manifest?.description ?? "",
+        version: manifest?.version ?? (typeof install.version === "string" ? install.version : "unknown"),
+        ...root ? { root } : {},
+        enabled,
+        ...enabledSource ? { enabledSource } : {},
+        installed: root !== void 0 && await isDir2(root),
+        skills: discovered.skills.length,
+        hooks: discovered.hooks.length,
+        mcpServers: discovered.mcpServers.length
+      });
+    }
+  }
+  for (const key of Object.keys(settings.enabledPlugins)) {
+    if (seen.has(key)) {
+      continue;
+    }
+    const { name, marketplace } = splitPluginKey(key);
+    const enabledSource = settings.sources.enabledPlugins[key];
+    plugins.push({
+      id: `claude:user:${key}`,
+      client: "claude",
+      scope: "user",
+      name,
+      ...marketplace ? { marketplace } : {},
+      qualifiedName: key,
+      description: "",
+      version: "unknown",
+      enabled: settings.enabledPlugins[key] === true,
+      ...enabledSource ? { enabledSource } : {},
+      installed: false,
+      skills: 0,
+      hooks: 0,
+      mcpServers: 0
+    });
+    if (marketplace && !(marketplace in marketplaces)) {
+      warnings.push({
+        client: "claude",
+        file: paths.knownMarketplaces,
+        message: `plugin "${key}" refers to unknown marketplace "${marketplace}"`
+      });
+    }
+  }
+  return { plugins, components };
+}
+async function discoverPluginComponents(root, owner, settings, warnings) {
+  const { plugin, enabled } = owner;
+  const components = emptyComponents();
+  const skillDirs = await collectSkillDirs(root, owner.declaredSkills);
+  components.skills.push(
+    ...await scanSkillDir(
+      path9.join(root, "skills"),
+      { scope: "plugin", plugin, skillDirs },
+      settings,
+      warnings
+    )
+  );
+  components.agents.push(...await scanDocDir(path9.join(root, "agents"), "plugin", warnings, plugin));
+  components.commands.push(
+    ...await scanDocDir(path9.join(root, "commands"), "plugin", warnings, plugin)
+  );
+  const hooksFile = path9.join(root, "hooks", "hooks.json");
+  const hooksResult = await readJsonFile(hooksFile);
+  if (hooksResult.error !== void 0) {
+    warnings.push({ client: "claude", file: hooksFile, message: hooksResult.error });
+  } else if (!hooksResult.missing) {
+    const record2 = asRecord(hooksResult.value);
+    const events = asRecord(record2?.hooks) ?? record2 ?? {};
+    for (const [event, groups] of Object.entries(events)) {
+      components.hooks.push(
+        ...hooksFromEvent(event, groups, {
+          idPrefix: `claude:plugin:${plugin}`,
+          scope: "plugin",
+          file: hooksFile,
+          settings,
+          plugin,
+          pluginEnabled: enabled,
+          ...owner.enabledSource ? { pluginEnabledSource: owner.enabledSource } : {},
+          warnings
+        })
+      );
+    }
+  }
+  const mcpFile = path9.join(root, ".mcp.json");
+  if (await isFile2(mcpFile)) {
+    const servers = await readMcpFile(mcpFile, warnings, { allowBareMap: true });
+    for (const [name, raw2] of Object.entries(servers)) {
+      const decided = applyMcpSwitch(`plugin:${plugin}:${name}`, settings, {
+        enabled,
+        ...owner.enabledSource ? { source: owner.enabledSource } : {}
+      });
+      const entry = toMcpEntry(name, raw2, {
+        id: `claude:plugin:${plugin}:${name}`,
+        scope: "plugin",
+        file: mcpFile,
+        plugin,
+        enabled: decided.enabled,
+        ...decided.source ? { enabledSource: decided.source } : {},
+        warnings
+      });
+      if (entry) {
+        components.mcpServers.push(entry);
+      }
+    }
+  }
+  return components;
+}
+function emptyComponents() {
+  return { skills: [], agents: [], commands: [], hooks: [], mcpServers: [] };
+}
+async function readManifest(file, warnings) {
+  const result = await readJsonFile(file);
+  if (result.missing) {
+    return void 0;
+  }
+  if (result.error !== void 0) {
+    warnings.push({ client: "claude", file, message: result.error });
+    return void 0;
+  }
+  const record2 = asRecord(result.value);
+  if (!record2) {
+    return void 0;
+  }
+  return {
+    ...typeof record2.description === "string" ? { description: record2.description } : {},
+    ...typeof record2.version === "string" ? { version: record2.version } : {},
+    // A manifest may point `skills` at another directory or list explicit
+    // skill paths. Kept unnarrowed; collectSkillDirs does the validation.
+    ...record2.skills !== void 0 ? { skills: record2.skills } : {}
+  };
+}
+function splitPluginKey(key) {
+  const at = key.lastIndexOf("@");
+  if (at <= 0) {
+    return { name: key };
+  }
+  return { name: key.slice(0, at), marketplace: key.slice(at + 1) };
+}
+function toScope(value) {
+  if (value === "project" || value === "local" || value === "plugin" || value === "builtin") {
+    return value;
+  }
+  return "user";
+}
+async function resolvePluginKey(plugin, projectRoot) {
+  if (plugin.includes("@")) {
+    return plugin;
+  }
+  const paths = claudePaths(projectRoot);
+  const keys = /* @__PURE__ */ new Set();
+  const installed = await readJsonFile(paths.installedPlugins);
+  for (const key of Object.keys(asRecord(asRecord(installed.value)?.plugins) ?? {})) {
+    keys.add(key);
+  }
+  for (const source of claudeSettingsFiles(projectRoot)) {
+    const settings = await readJsonFile(source.file);
+    for (const key of Object.keys(asRecord(asRecord(settings.value)?.enabledPlugins) ?? {})) {
+      keys.add(key);
+    }
+  }
+  const candidates = [...keys].filter((key) => splitPluginKey(key).name === plugin).sort();
+  const first = candidates[0];
+  if (candidates.length === 1 && first !== void 0) {
+    return first;
+  }
+  if (candidates.length === 0) {
+    throw new Error(
+      `unknown plugin "${plugin}": no installed plugin matches, so qualify it as <plugin>@<marketplace>`
+    );
+  }
+  throw new Error(
+    `plugin "${plugin}" is ambiguous across marketplaces (${candidates.join(", ")}): qualify it as <plugin>@<marketplace>`
+  );
+}
+async function readSettingsForWrite(file) {
+  const result = await readJsonFile(file);
+  if (result.error !== void 0) {
+    throw new Error(`refusing to edit ${file}: ${result.error}`);
+  }
+  if (result.missing) {
+    return {};
+  }
+  const record2 = asRecord(result.value);
+  if (!record2) {
+    throw new Error(`refusing to edit ${file}: expected a JSON object`);
+  }
+  return record2;
+}
+function writeSettings(file, settings, dryRun) {
+  return writeJsonSafely(file, settings, { dryRun, backupDir: backupDir() });
+}
+function applyList(settings, key, values) {
+  if (values.size === 0) {
+    delete settings[key];
+    return;
+  }
+  settings[key] = [...values].sort();
+}
+function isSkillVisibility(value) {
+  return typeof value === "string" && SKILL_VISIBILITIES.includes(value);
+}
+function isTransport(value) {
+  return value === "stdio" || value === "http" || value === "sse" || value === "ws";
+}
+async function readJsonFile(file) {
+  let raw2;
+  try {
+    raw2 = await readFile5(file, "utf8");
+  } catch (error2) {
+    const code = error2.code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return { missing: true };
+    }
+    return { missing: false, error: `could not read: ${code ?? describe(error2)}` };
+  }
+  try {
+    return { missing: false, value: parseJsonc(stripBom(raw2)) };
+  } catch (error2) {
+    return { missing: false, error: `invalid JSON: ${describe(error2)}` };
+  }
+}
+function stripBom(raw2) {
+  return raw2.charCodeAt(0) === 65279 ? raw2.slice(1) : raw2;
+}
+function describe(error2) {
+  return error2 instanceof Error ? error2.message : String(error2);
+}
+async function listChildDirs(dir, warnings) {
+  const names = [];
+  for (const entry of await readEntries(dir, warnings)) {
+    if (entry.isDirectory()) {
+      names.push(entry.name);
+      continue;
+    }
+    if (!entry.isSymbolicLink()) {
+      continue;
+    }
+    const target = path9.join(dir, entry.name);
+    if (await isDir2(target)) {
+      names.push(entry.name);
+    } else {
+      await warnIfBrokenLink(target, warnings);
+    }
+  }
+  return names.sort();
+}
+async function warnIfBrokenLink(target, warnings) {
+  if (await exists2(target)) {
+    return;
+  }
+  if (warnings.some((warning) => warning.file === target && warning.message.startsWith("broken"))) {
+    return;
+  }
+  const to = await readlink(target).catch(() => void 0);
+  warnings.push({
+    client: "claude",
+    file: target,
+    message: `broken symlink${to ? ` to ${to}` : ""}; nothing is loaded from it`
+  });
+}
+async function listChildFiles(dir, extension, warnings) {
+  const names = [];
+  for (const entry of await readEntries(dir, warnings)) {
+    if (path9.extname(entry.name) !== extension) {
+      continue;
+    }
+    if (entry.isFile()) {
+      names.push(entry.name);
+      continue;
+    }
+    if (!entry.isSymbolicLink()) {
+      continue;
+    }
+    const target = path9.join(dir, entry.name);
+    if (await isFile2(target)) {
+      names.push(entry.name);
+    } else {
+      await warnIfBrokenLink(target, warnings);
+    }
+  }
+  return names.sort();
+}
+async function readEntries(dir, warnings) {
+  try {
+    return await readdir4(dir, { withFileTypes: true });
+  } catch (error2) {
+    const code = error2.code;
+    if (code !== "ENOENT" && code !== "ENOTDIR") {
+      warnings.push({
+        client: "claude",
+        file: dir,
+        message: `could not list directory: ${code ?? describe(error2)}`
+      });
+    }
+    return [];
+  }
+}
+function asRecord(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return void 0;
+  }
+  return value;
+}
+function asStringArray(value) {
+  if (!Array.isArray(value)) {
+    return void 0;
+  }
+  return value.filter((item) => typeof item === "string");
+}
+function asStringRecord(value) {
+  const record2 = asRecord(value);
+  if (!record2) {
+    return void 0;
+  }
+  const out = {};
+  for (const [key, item] of Object.entries(record2)) {
+    if (typeof item === "string") {
+      out[key] = item;
+    }
+  }
+  return out;
+}
+
+// src/env/inventory.ts
+init_codex();
+
+// src/env/cursor.ts
+init_frontmatter();
+init_client_paths();
+init_skill_dirs();
+init_safe_io();
+import path11 from "node:path";
+var CLIENT2 = "cursor";
+var CURSOR_HOOK_EVENTS = [
+  "sessionStart",
+  "sessionEnd",
+  "preToolUse",
+  "postToolUse",
+  "postToolUseFailure",
+  "subagentStart",
+  "subagentStop",
+  "beforeShellExecution",
+  "afterShellExecution",
+  "beforeMCPExecution",
+  "afterMCPExecution",
+  "beforeReadFile",
+  "afterFileEdit",
+  "beforeSubmitPrompt",
+  "preCompact",
+  "stop",
+  "afterAgentResponse",
+  "afterAgentThought",
+  "beforeTabFileRead",
+  "afterTabFileEdit"
+];
+var CLAUDE_TO_CURSOR_EVENT = {
+  SessionStart: "sessionStart",
+  SessionEnd: "sessionEnd",
+  PreToolUse: "preToolUse",
+  PostToolUse: "postToolUse",
+  PostToolUseFailure: "postToolUseFailure",
+  SubagentStart: "subagentStart",
+  SubagentStop: "subagentStop",
+  UserPromptSubmit: "beforeSubmitPrompt",
+  PreCompact: "preCompact",
+  Stop: "stop"
+};
+var CURSOR_TO_CLAUDE_EVENT = Object.fromEntries(
+  Object.entries(CLAUDE_TO_CURSOR_EVENT).map(([claude, cursor]) => [cursor, claude])
+);
+function isCursorHookEvent(event) {
+  return CURSOR_HOOK_EVENTS.includes(event);
+}
+async function scanCursor(projectRoot) {
+  const paths = cursorPaths(projectRoot);
+  const scan = {
+    installed: await isDir2(paths.dir),
+    skills: [],
+    plugins: [],
+    mcpServers: [],
+    hooks: [],
+    agents: [],
+    commands: [],
+    memory: [],
+    warnings: []
+  };
+  await guard(scan.warnings, paths.userMcp, async () => {
+    scan.mcpServers.push(...await readMcpFile2(paths.userMcp, "user", scan.warnings));
+  });
+  await guard(scan.warnings, paths.projectMcp, async () => {
+    scan.mcpServers.push(...await readMcpFile2(paths.projectMcp, "project", scan.warnings));
+  });
+  await guard(scan.warnings, paths.userHooks, async () => {
+    scan.hooks.push(...await readCursorHooksFile(paths.userHooks, "user", scan.warnings));
+  });
+  await guard(scan.warnings, paths.projectHooks, async () => {
+    scan.hooks.push(...await readCursorHooksFile(paths.projectHooks, "project", scan.warnings));
+  });
+  await guard(scan.warnings, paths.userSkills, async () => {
+    scan.skills.push(...await readSkillsDir(paths.userSkills, "user", void 0, scan.warnings));
+  });
+  await guard(scan.warnings, paths.projectSkills, async () => {
+    scan.skills.push(...await readSkillsDir(paths.projectSkills, "project", void 0, scan.warnings));
+  });
+  await guard(scan.warnings, paths.builtinSkills, async () => {
+    scan.skills.push(...await readSkillsDir(paths.builtinSkills, "builtin", void 0, scan.warnings));
+  });
+  await guard(scan.warnings, paths.userCommands, async () => {
+    scan.commands.push(
+      ...await readMarkdownDir(paths.userCommands, "user", "command", void 0, scan.warnings)
+    );
+  });
+  await guard(scan.warnings, paths.projectCommands, async () => {
+    scan.commands.push(
+      ...await readMarkdownDir(paths.projectCommands, "project", "command", void 0, scan.warnings)
+    );
+  });
+  await guard(scan.warnings, paths.userRules, async () => {
+    scan.memory.push(...await readRulesDir(paths.userRules, "user", scan.warnings));
+  });
+  await guard(scan.warnings, paths.projectRules, async () => {
+    scan.memory.push(...await readRulesDir(paths.projectRules, "project", scan.warnings));
+  });
+  await guard(scan.warnings, paths.legacyRules, async () => {
+    const legacy = await readMemoryFile(paths.legacyRules, "project");
+    if (legacy) {
+      scan.memory.push(legacy);
+    }
+  });
+  await guard(scan.warnings, paths.pluginCacheDir, async () => {
+    await readPlugins(paths.pluginCacheDir, scan);
+  });
+  return scan;
+}
+async function setMcpServerEnabled(opts) {
+  const paths = cursorPaths(opts.projectRoot);
+  const file = opts.scope === "user" ? paths.userMcp : paths.projectMcp;
+  const parsed = await readJsonFile2(file);
+  if (parsed.error !== void 0) {
+    throw new Error(`cursor mcp.json is not valid JSON (${file}): ${parsed.error}`);
+  }
+  if (parsed.unreadable) {
+    throw new Error(`cursor mcp.json exists but cannot be read (${file})`);
+  }
+  const root = asRecord2(parsed.value) ?? {};
+  const enabledMap = { ...asRecord2(root.mcpServers) ?? {} };
+  const disabledMap = { ...asRecord2(root._disabledMcpServers) ?? {} };
+  const from = opts.enabled ? disabledMap : enabledMap;
+  const to = opts.enabled ? enabledMap : disabledMap;
+  const entry = from[opts.server];
+  if (entry === void 0) {
+    const raw2 = await readText(file);
+    return {
+      file,
+      changed: false,
+      created: false,
+      after: raw2 ?? "",
+      ...raw2 !== void 0 ? { before: raw2 } : {}
+    };
+  }
+  delete from[opts.server];
+  to[opts.server] = entry;
+  const next = { ...root, mcpServers: enabledMap };
+  if (Object.keys(disabledMap).length > 0) {
+    next._disabledMcpServers = disabledMap;
+  } else {
+    delete next._disabledMcpServers;
+  }
+  return writeJsonSafely(file, next, { dryRun: opts.dryRun === true, backupDir: backupDir() });
+}
+function parseCursorEvent(value) {
+  if (!Array.isArray(value)) {
+    return { defs: [], problems: ["expected an array of hook definitions"] };
+  }
+  const defs = [];
+  const problems = [];
+  for (const [index, item] of value.entries()) {
+    const def = asRecord2(item);
+    const command = typeof def?.command === "string" ? def.command : void 0;
+    if (!def || !command) {
+      problems.push(`hook ${index} has no command`);
+      continue;
+    }
+    defs.push({
+      command,
+      type: def.type === "prompt" ? "prompt" : "command",
+      ...typeof def.matcher === "string" ? { matcher: def.matcher } : {},
+      ...typeof def.timeout === "number" ? { timeout: def.timeout } : {}
+    });
+  }
+  return { defs, problems };
+}
+function parseClaudeEvent(value) {
+  if (!Array.isArray(value)) {
+    return { defs: [], problems: ["expected an array of hook groups"] };
+  }
+  const defs = [];
+  const problems = [];
+  for (const [index, item] of value.entries()) {
+    const group = asRecord2(item);
+    if (!group) {
+      problems.push(`group ${index} is not an object`);
+      continue;
+    }
+    const matcher = typeof group.matcher === "string" ? group.matcher : void 0;
+    if (!Array.isArray(group.hooks)) {
+      if (typeof group.command === "string" && group.command) {
+        defs.push({
+          command: group.command,
+          type: "command",
+          ...matcher !== void 0 ? { matcher } : {},
+          ...typeof group.timeout === "number" ? { timeout: group.timeout } : {}
+        });
+        continue;
+      }
+      problems.push(`group ${index} has no hooks array`);
+      continue;
+    }
+    for (const [inner, entry] of group.hooks.entries()) {
+      const hook = asRecord2(entry);
+      const command = typeof hook?.command === "string" ? hook.command : void 0;
+      if (!hook || !command) {
+        problems.push(`group ${index} hook ${inner} has no command`);
+        continue;
+      }
+      defs.push({
+        command,
+        type: "command",
+        ...matcher !== void 0 ? { matcher } : {},
+        ...typeof hook.timeout === "number" ? { timeout: hook.timeout } : {}
+      });
+    }
+  }
+  return { defs, problems };
+}
+async function readCursorHooksFile(file, scope, warnings) {
+  const events = await readEventMap(file, warnings);
+  const out = [];
+  for (const [event, value] of Object.entries(events)) {
+    if (!isCursorHookEvent(event)) {
+      warnings.push({ client: CLIENT2, file, message: `unknown hook event: ${event}` });
+    }
+    const parsed = parseCursorEvent(value);
+    for (const problem of parsed.problems) {
+      warnings.push({ client: CLIENT2, file, message: `${event}: ${problem}` });
+    }
+    out.push(...toHookEntries(event, parsed.defs, scope, file, void 0));
+  }
+  return out;
+}
+async function readPluginHooksFile(file, plugin, warnings) {
+  const events = await readEventMap(file, warnings);
+  const out = [];
+  for (const [event, value] of Object.entries(events)) {
+    const parsed = parseClaudeEvent(value);
+    for (const problem of parsed.problems) {
+      warnings.push({ client: CLIENT2, file, message: `${event}: ${problem}` });
+    }
+    out.push(...toHookEntries(event, parsed.defs, "plugin", file, plugin));
+  }
+  return out;
+}
+async function readEventMap(file, warnings) {
+  const parsed = await readJsonFile2(file);
+  if (parsed.missing) {
+    return {};
+  }
+  if (parsed.unreadable) {
+    warnings.push({ client: CLIENT2, file, message: "unreadable" });
+    return {};
+  }
+  if (parsed.error !== void 0) {
+    warnings.push({ client: CLIENT2, file, message: `invalid JSON: ${parsed.error}` });
+    return {};
+  }
+  const root = asRecord2(parsed.value);
+  const events = asRecord2(root?.hooks);
+  if (!events) {
+    if (!isEmptyRecord(parsed.value)) {
+      warnings.push({ client: CLIENT2, file, message: 'no "hooks" object' });
+    }
+    return {};
+  }
+  return events;
+}
+function toHookEntries(event, defs, scope, file, plugin) {
+  return defs.map((def, index) => ({
+    id: `cursor:${scope}:${plugin ? `${plugin}:` : ""}${event}:${index}`,
+    client: CLIENT2,
+    scope,
+    event,
+    type: def.type,
+    command: def.command,
+    file,
+    enabled: true,
+    index,
+    ...def.matcher !== void 0 ? { matcher: def.matcher } : {},
+    ...def.timeout !== void 0 ? { timeout: def.timeout } : {},
+    ...plugin ? { plugin } : {}
+  }));
+}
+async function readMcpFile2(file, scope, warnings) {
+  const parsed = await readJsonFile2(file);
+  if (parsed.missing) {
+    return [];
+  }
+  if (parsed.unreadable) {
+    warnings.push({ client: CLIENT2, file, message: "unreadable" });
+    return [];
+  }
+  if (parsed.error !== void 0) {
+    warnings.push({ client: CLIENT2, file, message: `invalid JSON: ${parsed.error}` });
+    return [];
+  }
+  const root = asRecord2(parsed.value);
+  if (!root) {
+    warnings.push({ client: CLIENT2, file, message: "expected a JSON object" });
+    return [];
+  }
+  const enabled = asRecord2(root.mcpServers);
+  const disabled = asRecord2(root._disabledMcpServers);
+  if (!enabled && !disabled) {
+    if (Object.keys(root).length > 0) {
+      warnings.push({ client: CLIENT2, file, message: 'no "mcpServers" object' });
+    }
+    return [];
+  }
+  const parked = {};
+  for (const [name, value] of Object.entries(disabled ?? {})) {
+    if (enabled && name in enabled) {
+      warnings.push({
+        client: CLIENT2,
+        file,
+        message: `mcp server ${name} is in both mcpServers and _disabledMcpServers; using the enabled entry`
+      });
+      continue;
+    }
+    parked[name] = value;
+  }
+  return [
+    ...mcpEntries(enabled ?? {}, file, scope, true, void 0, warnings),
+    ...mcpEntries(parked, file, scope, false, void 0, warnings)
+  ];
+}
+function mcpEntries(servers, file, scope, enabled, plugin, warnings) {
+  const out = [];
+  for (const [name, value] of Object.entries(servers)) {
+    const record2 = asRecord2(value);
+    if (!record2) {
+      warnings.push({ client: CLIENT2, file, message: `mcp server ${name} is not an object` });
+      continue;
+    }
+    const args = Array.isArray(record2.args) ? record2.args.map((arg) => String(arg)) : void 0;
+    const env = stringMap(record2.env);
+    const headers = stringMap(record2.headers);
+    out.push({
+      id: `cursor:${scope}:${plugin ? `${plugin}:` : ""}${name}`,
+      client: CLIENT2,
+      scope,
+      name,
+      transport: inferTransport(record2),
+      file,
+      enabled,
+      ...typeof record2.command === "string" ? { command: record2.command } : {},
+      ...args ? { args } : {},
+      ...env ? { env } : {},
+      ...typeof record2.cwd === "string" ? { cwd: record2.cwd } : {},
+      ...typeof record2.url === "string" ? { url: record2.url } : {},
+      ...headers ? { headers } : {},
+      ...plugin ? { plugin } : {},
+      // Cursor has no enabled flag; disabled servers are the ones Yard parked
+      // under `_disabledMcpServers`, so the file itself is the source.
+      ...enabled ? {} : { enabledSource: file }
+    });
+  }
+  return out;
+}
+function inferTransport(record2) {
+  const declared = typeof record2.type === "string" ? record2.type.toLowerCase() : void 0;
+  if (declared === "stdio" || declared === "http" || declared === "sse" || declared === "ws") {
+    return declared;
+  }
+  if (declared === "streamable-http" || declared === "streamablehttp") {
+    return "http";
+  }
+  if (declared === "websocket") {
+    return "ws";
+  }
+  return typeof record2.url === "string" && record2.url ? "http" : "stdio";
+}
+async function readSkillsDir(dir, scope, plugin, warnings, skillDirs) {
+  const out = [];
+  const dirs = skillDirs ?? (await listDirs(dir)).map((name) => path11.join(dir, name));
+  for (const skillDir of dirs) {
+    const name = path11.basename(skillDir);
+    const file = path11.join(skillDir, "SKILL.md");
+    if (!await isFile2(file)) {
+      continue;
+    }
+    const raw2 = await readText(file);
+    if (raw2 === void 0) {
+      warnings.push({ client: CLIENT2, file, message: "unreadable" });
+      continue;
+    }
+    const { data } = parseFrontmatter(raw2);
+    const qualifiedName = plugin ? `${plugin}:${name}` : name;
+    out.push({
+      id: `cursor:${scope}:${qualifiedName}`,
+      client: CLIENT2,
+      scope,
+      name,
+      qualifiedName,
+      description: data.description ?? "",
+      file,
+      dir: skillDir,
+      visibility: "on",
+      frontmatter: data,
+      bytes: Buffer.byteLength(raw2, "utf8"),
+      ...plugin ? { plugin } : {}
+    });
+  }
+  return out;
+}
+async function readMarkdownDir(dir, scope, kind, plugin, warnings) {
+  const out = [];
+  for (const fileName of await listFiles(dir, [".md", ".mdc"])) {
+    const file = path11.join(dir, fileName);
+    const raw2 = await readText(file);
+    if (raw2 === void 0) {
+      warnings.push({ client: CLIENT2, file, message: "unreadable" });
+      continue;
+    }
+    const { data } = parseFrontmatter(raw2);
+    const name = fileName.replace(/\.mdc?$/, "");
+    out.push({
+      id: `cursor:${scope}:${kind}:${plugin ? `${plugin}:` : ""}${name}`,
+      client: CLIENT2,
+      scope,
+      name,
+      description: data.description ?? "",
+      file,
+      bytes: Buffer.byteLength(raw2, "utf8"),
+      ...plugin ? { plugin } : {}
+    });
+  }
+  return out;
+}
+async function readRulesDir(dir, scope, warnings) {
+  const out = [];
+  for (const fileName of await listFiles(dir, [".mdc", ".md"])) {
+    const file = path11.join(dir, fileName);
+    const raw2 = await readText(file);
+    if (raw2 === void 0) {
+      warnings.push({ client: CLIENT2, file, message: "unreadable" });
+      continue;
+    }
+    const { data } = parseFrontmatter(raw2);
+    if (data.description === void 0 && data.alwaysApply === void 0 && data.globs === void 0) {
+      warnings.push({
+        client: CLIENT2,
+        file,
+        message: "rule has no description, globs, or alwaysApply frontmatter"
+      });
+    }
+    out.push(memoryEntry(file, scope, raw2));
+  }
+  return out;
+}
+async function readMemoryFile(file, scope) {
+  const raw2 = await readText(file);
+  return raw2 === void 0 ? void 0 : memoryEntry(file, scope, raw2);
+}
+function memoryEntry(file, scope, raw2) {
+  const name = path11.basename(file);
+  return {
+    id: `cursor:${scope}:memory:${name}`,
+    client: CLIENT2,
+    scope,
+    name,
+    file,
+    bytes: Buffer.byteLength(raw2, "utf8")
+  };
+}
+async function readPlugins(cacheDir, scan) {
+  for (const marketplace of await listDirs(cacheDir)) {
+    const marketplaceDir = path11.join(cacheDir, marketplace);
+    for (const pluginName of await listDirs(marketplaceDir)) {
+      const versionsDir = path11.join(marketplaceDir, pluginName);
+      const shas = await listDirs(versionsDir);
+      const sha = shas[shas.length - 1];
+      if (sha === void 0) {
+        continue;
+      }
+      if (shas.length > 1) {
+        scan.warnings.push({
+          client: CLIENT2,
+          file: versionsDir,
+          message: `${shas.length} cached versions; scanning ${sha}`
+        });
+      }
+      await readPlugin2(path11.join(versionsDir, sha), marketplace, pluginName, scan);
+    }
+  }
+}
+async function readPlugin2(root, marketplace, dirName, scan) {
+  const manifestFile = path11.join(root, ".cursor-plugin", "plugin.json");
+  const parsed = await readJsonFile2(manifestFile);
+  if (parsed.missing) {
+    return;
+  }
+  if (parsed.unreadable) {
+    scan.warnings.push({ client: CLIENT2, file: manifestFile, message: "unreadable" });
+    return;
+  }
+  if (parsed.error !== void 0) {
+    scan.warnings.push({ client: CLIENT2, file: manifestFile, message: `invalid JSON: ${parsed.error}` });
+    return;
+  }
+  const manifest = asRecord2(parsed.value);
+  if (!manifest) {
+    scan.warnings.push({ client: CLIENT2, file: manifestFile, message: "expected a JSON object" });
+    return;
+  }
+  const name = typeof manifest.name === "string" && manifest.name ? manifest.name : dirName;
+  const declaredSkills = declaredSkillPaths(root, manifest.skills, manifestFile, scan.warnings);
+  const skillDirs = (await collectSkillDirs(root, declaredSkills)).filter((dir) => {
+    if (within(root, dir)) {
+      return true;
+    }
+    scan.warnings.push({
+      client: CLIENT2,
+      file: manifestFile,
+      message: `skills path escapes the plugin root: ${dir}`
+    });
+    return false;
+  });
+  const skills = await readSkillsDir(path11.join(root, "skills"), "plugin", name, scan.warnings, skillDirs);
+  const agents = [];
+  for (const dir of manifestDirs(root, manifest.agents, "agents", manifestFile, scan.warnings)) {
+    agents.push(...await readMarkdownDir(dir, "plugin", "agent", name, scan.warnings));
+  }
+  const commands = [];
+  for (const dir of manifestDirs(root, manifest.commands, "commands", manifestFile, scan.warnings)) {
+    commands.push(...await readMarkdownDir(dir, "plugin", "command", name, scan.warnings));
+  }
+  const hooks = await readPluginHooksFile(path11.join(root, "hooks", "hooks.json"), name, scan.warnings);
+  const inlineMcp = asRecord2(manifest.mcpServers);
+  const mcpServers = inlineMcp ? mcpEntries(inlineMcp, manifestFile, "plugin", true, name, scan.warnings) : [];
+  scan.skills.push(...skills);
+  scan.agents.push(...agents);
+  scan.commands.push(...commands);
+  scan.hooks.push(...hooks);
+  scan.mcpServers.push(...mcpServers);
+  scan.plugins.push({
+    id: `cursor:user:${name}`,
+    client: CLIENT2,
+    scope: "user",
+    name,
+    marketplace,
+    qualifiedName: name,
+    description: typeof manifest.description === "string" ? manifest.description : "",
+    version: typeof manifest.version === "string" ? manifest.version : "",
+    root,
+    enabled: true,
+    installed: true,
+    skills: skills.length,
+    hooks: hooks.length,
+    mcpServers: mcpServers.length
+  });
+}
+function manifestDirs(root, value, fallback, manifestFile, warnings) {
+  const raw2 = value === void 0 || value === null ? [fallback] : Array.isArray(value) ? value : [value];
+  const out = [];
+  for (const item of raw2) {
+    if (typeof item !== "string" || !item) {
+      warnings.push({ client: CLIENT2, file: manifestFile, message: `${fallback} entry is not a path` });
+      continue;
+    }
+    const resolved = path11.resolve(root, item);
+    if (!within(root, resolved)) {
+      warnings.push({
+        client: CLIENT2,
+        file: manifestFile,
+        message: `${fallback} path escapes the plugin root: ${item}`
+      });
+      continue;
+    }
+    out.push(resolved);
+  }
+  return out;
+}
+function declaredSkillPaths(root, value, manifestFile, warnings) {
+  if (value === void 0 || value === null) {
+    return void 0;
+  }
+  const items = Array.isArray(value) ? value : [value];
+  const out = [];
+  for (const item of items) {
+    if (typeof item !== "string" || !item) {
+      warnings.push({ client: CLIENT2, file: manifestFile, message: "skills entry is not a path" });
+      continue;
+    }
+    if (!within(root, path11.resolve(root, item))) {
+      warnings.push({
+        client: CLIENT2,
+        file: manifestFile,
+        message: `skills path escapes the plugin root: ${item}`
+      });
+      continue;
+    }
+    out.push(item);
+  }
+  return out;
+}
+async function readJsonFile2(file) {
+  const raw2 = await readText(file);
+  if (raw2 === void 0) {
+    return await exists2(file) ? { missing: false, unreadable: true } : { missing: true, unreadable: false };
+  }
+  const text = stripBom2(raw2);
+  if (text.trim() === "") {
+    return { value: {}, missing: false, unreadable: false };
+  }
+  try {
+    return { value: parseJsonc(text), missing: false, unreadable: false };
+  } catch (error2) {
+    return {
+      error: error2 instanceof Error ? error2.message : String(error2),
+      missing: false,
+      unreadable: false
+    };
+  }
+}
+function stripBom2(raw2) {
+  return raw2.charCodeAt(0) === 65279 ? raw2.slice(1) : raw2;
+}
+function within(root, target) {
+  return target === root || target.startsWith(root + path11.sep);
+}
+function isEmptyRecord(value) {
+  const record2 = asRecord2(value);
+  return record2 !== void 0 && Object.keys(record2).length === 0;
+}
+function stringMap(value) {
+  const record2 = asRecord2(value);
+  if (!record2) {
+    return void 0;
+  }
+  const out = {};
+  for (const [key, item] of Object.entries(record2)) {
+    if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+      out[key] = String(item);
+    }
+  }
+  return out;
+}
+function asRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : void 0;
+}
+async function guard(warnings, file, run) {
+  try {
+    await run();
+  } catch (error2) {
+    warnings.push({
+      client: CLIENT2,
+      file,
+      message: error2 instanceof Error ? error2.message : String(error2)
+    });
+  }
+}
+
+// src/env/inventory.ts
+async function scanEnvironment(projectRoot, options = {}) {
+  const wanted = options.clients;
+  const inventory = emptyInventory(projectRoot);
+  const scans = [
+    { client: "claude", run: scanClaude },
+    { client: "codex", run: scanCodex },
+    { client: "cursor", run: scanCursor }
+  ].filter((entry) => !wanted || wanted.includes(entry.client));
+  const results = await Promise.all(
+    scans.map(async (entry) => {
+      try {
+        return { client: entry.client, result: await entry.run(projectRoot) };
+      } catch (error2) {
+        return {
+          client: entry.client,
+          error: error2 instanceof Error ? error2.message : String(error2)
+        };
+      }
+    })
+  );
+  for (const outcome of results) {
+    if ("error" in outcome && outcome.error !== void 0) {
+      inventory.warnings.push({
+        client: outcome.client,
+        file: "",
+        message: `scan failed: ${outcome.error}`
+      });
+      continue;
+    }
+    const result = "result" in outcome ? outcome.result : void 0;
+    if (!result?.installed) {
+      continue;
+    }
+    inventory.clients.push(outcome.client);
+    inventory.skills.push(...result.skills);
+    inventory.plugins.push(...result.plugins);
+    inventory.mcpServers.push(...result.mcpServers);
+    inventory.hooks.push(...result.hooks);
+    inventory.agents.push(...result.agents);
+    inventory.commands.push(...result.commands);
+    inventory.memory.push(...result.memory);
+    inventory.warnings.push(...result.warnings);
+  }
+  sortInventory(inventory);
+  return inventory;
+}
+function sortInventory(inventory) {
+  const byId = (a, b) => a.id.localeCompare(b.id);
+  inventory.clients.sort();
+  inventory.skills.sort(byId);
+  inventory.plugins.sort(byId);
+  inventory.mcpServers.sort(byId);
+  inventory.hooks.sort(byId);
+  inventory.agents.sort(byId);
+  inventory.commands.sort(byId);
+  inventory.memory.sort(byId);
+}
+function duplicateSkills(inventory) {
+  const byName = /* @__PURE__ */ new Map();
+  for (const skill of inventory.skills) {
+    if (skill.visibility === "off") {
+      continue;
+    }
+    const key = `${skill.client}:${skill.qualifiedName}`;
+    byName.set(key, [...byName.get(key) ?? [], skill.id]);
+  }
+  return [...byName.entries()].filter(([, ids]) => ids.length > 1).map(([name, ids]) => ({ name, ids })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// src/cli/format.ts
+import os from "node:os";
+import path12 from "node:path";
+var ANSI = /\u001b\[[0-9;]*m/g;
+var ELLIPSIS = "\u2026";
+function visibleWidth(value) {
+  return value.replace(ANSI, "").length;
+}
+function truncate(value, max) {
+  if (max <= 0) {
+    return "";
+  }
+  if (value.length <= max) {
+    return value;
+  }
+  if (max === 1) {
+    return ELLIPSIS;
+  }
+  return `${value.slice(0, max - 1)}${ELLIPSIS}`;
+}
+function pad(value, width, align = "left") {
+  const fill = " ".repeat(Math.max(0, width - visibleWidth(value)));
+  return align === "right" ? `${fill}${value}` : `${value}${fill}`;
+}
+function renderTable(columns, rows, options = {}) {
+  const gap = " ".repeat(options.gap ?? 2);
+  const head = options.head !== false;
+  const style = options.headStyle ?? ((value) => value);
+  const cells = rows.map(
+    (row) => columns.map((column, index) => {
+      const raw2 = row[index] ?? "";
+      return column.max === void 0 ? raw2 : truncate(raw2, column.max);
+    })
+  );
+  const widths = columns.map((column, index) => {
+    const start = head ? visibleWidth(column.header) : 0;
+    return cells.reduce((widest, row) => Math.max(widest, visibleWidth(row[index] ?? "")), start);
+  });
+  const line = (values) => columns.map((column, index) => pad(values[index] ?? "", widths[index] ?? 0, column.align)).join(gap).trimEnd();
+  const lines = [];
+  if (head) {
+    lines.push(line(columns.map((column) => style(column.header))));
+  }
+  for (const row of cells) {
+    lines.push(line(row));
+  }
+  return lines.join("\n");
+}
+function renderJson(value) {
+  return JSON.stringify(value, null, 2) ?? "null";
+}
+function bar(value, max, width = 12) {
+  if (max <= 0 || value <= 0) {
+    return "";
+  }
+  const filled = Math.max(1, Math.min(width, Math.round(value / max * width)));
+  return "\u2588".repeat(filled);
+}
+function percent(value, total) {
+  if (total <= 0) {
+    return "0%";
+  }
+  return `${Math.round(value / total * 100)}%`;
+}
+function plural(count, singular, many = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : many}`;
+}
+function shortenPath(file, projectRoot) {
+  if (!file) {
+    return "";
+  }
+  if (projectRoot) {
+    const relative = path12.relative(projectRoot, file);
+    if (relative && !relative.startsWith("..") && !path12.isAbsolute(relative)) {
+      return relative;
+    }
+  }
+  const home2 = os.homedir();
+  if (home2 && file.startsWith(home2 + path12.sep)) {
+    return `~${file.slice(home2.length)}`;
+  }
+  return file;
+}
+function createStyle(enabled) {
+  const wrap = (code) => (value) => enabled ? `\x1B[${code}m${value}\x1B[0m` : value;
+  return {
+    dim: wrap("2"),
+    bold: wrap("1"),
+    red: wrap("31"),
+    yellow: wrap("33"),
+    green: wrap("32"),
+    cyan: wrap("36")
+  };
+}
+function colorEnabled(json2) {
+  return !json2 && process.stdout.isTTY === true && !process.env.NO_COLOR;
+}
+
+// src/cli/context.ts
+async function runContext(args) {
+  rejectUnknownFlags(args, [...GLOBAL_FLAGS, "client", "probe", "probe-timeout"]);
+  const options = commonOptions(args);
+  const probe = flagBool(args, "probe");
+  const probeTimeoutMs = flagNumber(args, "probe-timeout");
+  const inventory = await scanEnvironment(options.projectRoot, {
+    ...options.client ? { clients: [options.client] } : {}
+  });
+  const report = await buildContextReport(inventory, {
+    probe,
+    ...probeTimeoutMs !== void 0 ? { probeTimeoutMs } : {}
+  });
+  const offenders = topOffenders(report, 10).map((line) => ({
+    ...line,
+    ...line.remedy ? { remedy: qualify(line.remedy, line.client, report) } : {}
+  }));
+  if (options.json) {
+    console.log(renderJson({ ...report, offenders }));
+    return 0;
+  }
+  printLedger(report, offenders, createStyle(colorEnabled(options.json)));
+  return 0;
+}
+function printLedger(report, offenders, style) {
+  const head = (value) => style.dim(value);
+  if (!report.lines.length) {
+    console.log("nothing is loaded, so nothing is charged against your context window");
+    return;
+  }
+  console.log(
+    `${style.bold(formatTokens(report.total))} estimated tokens per turn across ${report.clients.join(", ")}`
+  );
+  console.log("");
+  const kinds = Object.entries(report.byKind).filter(([, tokens]) => tokens > 0).sort((a, b) => b[1] - a[1]);
+  const widestKind = kinds[0]?.[1] ?? 0;
+  console.log(
+    renderTable(
+      [{ header: "by kind" }, { header: "tokens", align: "right" }, { header: "share", align: "right" }, { header: "" }],
+      kinds.map(([kind, tokens]) => [
+        kind,
+        formatTokens(tokens),
+        percent(tokens, report.total),
+        bar(tokens, widestKind)
+      ]),
+      { headStyle: head }
+    )
+  );
+  console.log("");
+  const clients = Object.entries(report.byClient).filter((entry) => typeof entry[1] === "number" && entry[1] > 0).sort((a, b) => b[1] - a[1]);
+  const widestClient = clients[0]?.[1] ?? 0;
+  console.log(
+    renderTable(
+      [
+        { header: "by client" },
+        { header: "tokens", align: "right" },
+        { header: "share", align: "right" },
+        { header: "" }
+      ],
+      clients.map(([client, tokens]) => [
+        client,
+        formatTokens(tokens),
+        percent(tokens, report.total),
+        bar(tokens, widestClient)
+      ]),
+      { headStyle: head }
+    )
+  );
+  console.log("");
+  if (offenders.length) {
+    console.log(
+      renderTable(
+        [
+          { header: "costliest" },
+          { header: "kind" },
+          { header: "client" },
+          { header: "tokens", align: "right" },
+          { header: "detail", max: 40 },
+          { header: "turn it off", max: 46 }
+        ],
+        offenders.map((line) => [
+          line.label,
+          line.kind,
+          line.client,
+          formatTokens(line.tokens),
+          line.measured ? line.detail ?? "" : style.yellow(line.detail ?? "estimated"),
+          line.remedy ?? ""
+        ]),
+        { headStyle: head }
+      )
+    );
+    console.log("");
+  }
+  for (const note2 of report.notes) {
+    console.log(style.dim(note2));
+  }
+  const next = offenders[0]?.remedy;
+  console.log("");
+  console.log(next ? `next: ${next}` : "next: yard doctor");
+}
+function qualify(remedy, client, report) {
+  const sharing = new Set(report.lines.filter((line) => line.remedy === remedy).map((line) => line.client));
+  return sharing.size > 1 ? `${remedy} --client=${client}` : remedy;
+}
+
+// src/env/doctor.ts
+init_safe_io();
+import path13 from "node:path";
+var DESCRIPTION_BUDGET = 1024;
+async function diagnose(inventory, options = {}) {
+  const found = [];
+  for (const warning of inventory.warnings) {
+    found.push({
+      severity: "warning",
+      client: warning.client,
+      code: "unreadable-config",
+      summary: warning.file ? `${warning.file}: ${warning.message}` : warning.message,
+      ...warning.file ? { file: warning.file } : {},
+      remedy: "Fix or remove the file \u2014 the client silently ignores what it cannot parse"
+    });
+  }
+  found.push(...await checkHooks(inventory));
+  found.push(...checkSkills(inventory));
+  found.push(...checkPlugins(inventory));
+  found.push(...checkMcpApproval(inventory));
+  for (const duplicate of duplicateSkills(inventory)) {
+    found.push({
+      severity: "warning",
+      client: duplicate.ids[0]?.split(":")[0],
+      code: "duplicate-skill",
+      summary: `${duplicate.name} is defined ${duplicate.ids.length} times; the client picks one and ignores the rest`,
+      remedy: `Rename or disable all but one of: ${duplicate.ids.join(", ")}`
+    });
+  }
+  if (options.probe) {
+    found.push(...await checkMcpReachable(inventory, options));
+  }
+  return found.sort(
+    (a, b) => rank(a.severity) - rank(b.severity) || a.code.localeCompare(b.code) || a.summary.localeCompare(b.summary)
+  );
+}
+async function checkHooks(inventory) {
+  const found = [];
+  for (const hook of inventory.hooks) {
+    if (hook.type !== "command") {
+      continue;
+    }
+    const script = scriptPathFrom(hook.command);
+    if (!script) {
+      continue;
+    }
+    const base = hook.plugin ? pluginRootOf(hook.file) : path13.dirname(hook.file);
+    const resolved = path13.isAbsolute(script) ? script : path13.resolve(base, script);
+    if (await exists2(resolved)) {
+      continue;
+    }
+    found.push({
+      severity: "error",
+      client: hook.client,
+      code: "hook-script-missing",
+      summary: `${hook.event} hook runs ${script}, which does not exist`,
+      file: hook.file,
+      remedy: `Restore ${resolved}, or remove the hook from ${hook.file}`
+    });
+  }
+  return found;
+}
+function checkSkills(inventory) {
+  const found = [];
+  for (const skill of inventory.skills) {
+    if (!skill.frontmatter.name) {
+      found.push({
+        severity: "error",
+        client: skill.client,
+        code: "skill-missing-name",
+        summary: `${skill.id} has no "name" in its frontmatter`,
+        file: skill.file,
+        remedy: `Add "name: ${skill.name}" to the frontmatter`
+      });
+    }
+    if (!skill.description) {
+      found.push({
+        severity: "error",
+        client: skill.client,
+        code: "skill-missing-description",
+        summary: `${skill.id} has no description, so the model has nothing to decide on`,
+        file: skill.file,
+        remedy: "Add a description saying when to use the skill"
+      });
+      continue;
+    }
+    if (skill.description.length > DESCRIPTION_BUDGET) {
+      found.push({
+        severity: "warning",
+        client: skill.client,
+        code: "skill-description-long",
+        summary: `${skill.id} has a ${skill.description.length}-char description; the tail is truncated before the model sees it`,
+        file: skill.file,
+        remedy: "Shorten it to the trigger conditions and move the detail into the body"
+      });
+    }
+  }
+  return found;
+}
+function checkPlugins(inventory) {
+  const found = [];
+  const contributions = /* @__PURE__ */ new Map();
+  const credit = (client, plugin) => {
+    if (!plugin) {
+      return;
+    }
+    const key = `${client}:${plugin}`;
+    contributions.set(key, (contributions.get(key) ?? 0) + 1);
+  };
+  for (const item of [
+    ...inventory.skills,
+    ...inventory.hooks,
+    ...inventory.mcpServers,
+    ...inventory.agents,
+    ...inventory.commands
+  ]) {
+    credit(item.client, item.plugin);
+  }
+  for (const plugin of inventory.plugins) {
+    if (plugin.enabled && !plugin.installed) {
+      found.push({
+        severity: "error",
+        client: plugin.client,
+        code: "plugin-not-installed",
+        summary: `${plugin.qualifiedName} is enabled but is not on disk`,
+        ...plugin.enabledSource ? { file: plugin.enabledSource } : {},
+        remedy: `Install it, or remove it from ${plugin.enabledSource ?? "settings"}`
+      });
+    }
+    if (plugin.enabled && plugin.installed && !contributions.get(`${plugin.client}:${plugin.name}`)) {
+      found.push({
+        severity: "info",
+        client: plugin.client,
+        code: "plugin-empty",
+        summary: `${plugin.qualifiedName} is enabled but contributes nothing loadable`,
+        ...plugin.root ? { file: plugin.root } : {},
+        remedy: `yard plugin disable ${plugin.qualifiedName}`
+      });
+    }
+  }
+  return found;
+}
+function checkMcpApproval(inventory) {
+  return inventory.mcpServers.filter((server) => server.client === "claude" && server.scope === "project" && !server.enabled && !server.enabledSource).map((server) => ({
+    severity: "info",
+    client: server.client,
+    code: "mcp-pending-approval",
+    summary: `${server.name} is declared in .mcp.json but has not been approved, so it is not loaded`,
+    file: server.file,
+    remedy: `yard mcp enable ${server.name}`
+  }));
+}
+async function checkMcpReachable(inventory, options) {
+  const enabled = inventory.mcpServers.filter((server) => server.enabled && server.transport === "stdio");
+  if (!enabled.length) {
+    return [];
+  }
+  const results = await probeAll(enabled, {
+    ...options.probeTimeoutMs !== void 0 ? { timeoutMs: options.probeTimeoutMs } : {}
+  });
+  return results.filter((result) => !result.ok).map((result) => {
+    const server = enabled.find((item) => item.id === result.server);
+    return {
+      severity: "error",
+      client: server?.client ?? "claude",
+      code: "mcp-unreachable",
+      summary: `${server?.name ?? result.server} did not start: ${result.error ?? "unknown error"}`,
+      ...server?.file ? { file: server.file } : {},
+      remedy: `Fix the command, or run: yard mcp disable ${server?.name ?? result.server}`
+    };
+  });
+}
+function scriptPathFrom(command) {
+  const trimmed = command.trim();
+  if (/[;&|<>]|\$\(|\bif\b|\bfor\b|\bwhile\b/.test(trimmed)) {
+    return void 0;
+  }
+  const tokens = trimmed.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  const candidates = tokens.map((token) => token.replace(/^["']|["']$/g, "")).filter((token) => !token.startsWith("-"));
+  const script = candidates.find((token) => /[/\\]/.test(token) && /\.[a-z0-9]+$/i.test(token));
+  if (!script || script.includes("${") || script.includes("$")) {
+    return void 0;
+  }
+  return script;
+}
+function pluginRootOf(hookFile) {
+  return path13.resolve(path13.dirname(hookFile), "..");
+}
+function rank(severity) {
+  return severity === "error" ? 0 : severity === "warning" ? 1 : 2;
+}
+
+// src/cli/doctor.ts
+var DETAIL_WIDTH = 96;
+async function runDoctor(args) {
+  rejectUnknownFlags(args, [...GLOBAL_FLAGS, "client", "probe", "probe-timeout"]);
+  const options = commonOptions(args);
+  const probe = flagBool(args, "probe");
+  const probeTimeoutMs = flagNumber(args, "probe-timeout");
+  const inventory = await scanEnvironment(options.projectRoot, {
+    ...options.client ? { clients: [options.client] } : {}
+  });
+  const found = await diagnose(inventory, {
+    probe,
+    ...probeTimeoutMs !== void 0 ? { probeTimeoutMs } : {}
+  });
+  const errors = found.filter((item) => item.severity === "error").length;
+  if (options.json) {
+    console.log(renderJson({ projectRoot: inventory.projectRoot, clients: inventory.clients, diagnoses: found }));
+    return errors ? 1 : 0;
+  }
+  const style = createStyle(colorEnabled(options.json));
+  if (!found.length) {
+    console.log("no problems found");
+    return 0;
+  }
+  const rows = [];
+  for (const item of found) {
+    rows.push([severityLabel(item.severity, style), item.client, item.code, truncate(item.summary, DETAIL_WIDTH)]);
+    if (item.remedy) {
+      rows.push(["", "", "", style.dim(truncate(`fix: ${item.remedy}`, DETAIL_WIDTH))]);
+    }
+    if (item.file && !item.summary.includes(item.file)) {
+      rows.push(["", "", "", style.dim(truncate(shortenPath(item.file, inventory.projectRoot), DETAIL_WIDTH))]);
+    }
+  }
+  console.log(
+    renderTable(
+      [{ header: "severity" }, { header: "client" }, { header: "code" }, { header: "what is wrong" }],
+      rows,
+      { headStyle: (value) => style.dim(value) }
+    )
+  );
+  console.log("");
+  console.log(summarise(found));
+  return errors ? 1 : 0;
+}
+function summarise(found) {
+  const counts = { error: 0, warning: 0, info: 0 };
+  for (const item of found) {
+    counts[item.severity] += 1;
+  }
+  const parts = ["error", "warning", "info"].filter((severity) => counts[severity] > 0).map((severity) => plural(counts[severity], severity));
+  return parts.join(", ");
+}
+function severityLabel(severity, style) {
+  if (severity === "error") {
+    return style.red(severity);
+  }
+  if (severity === "warning") {
+    return style.yellow(severity);
+  }
+  return style.dim(severity);
+}
+
+// src/cli/emit-mcp.ts
+async function runEmitMcp() {
+  await writeMcpFiles(YARD_PLUGIN_DIR);
+  console.error(`wrote ${YARD_PLUGIN_DIR}/.mcp.json`);
+  console.error(`wrote ${YARD_PLUGIN_DIR}/mcp.json`);
+  return 0;
+}
+
+// src/env/actions.ts
+async function setSkillVisibility2(opts) {
+  const client = await resolveClient(
+    opts,
+    (inventory) => inventory.skills.filter((skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill)
+  );
+  if (client !== "claude") {
+    const enabled = opts.visibility === "on";
+    return setSkillEnabled({ ...opts, enabled, client });
+  }
+  const result = await setSkillVisibility({
+    skill: opts.skill,
+    visibility: opts.visibility,
+    projectRoot: opts.projectRoot,
+    ...opts.scope ? { scope: opts.scope } : {},
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  });
+  return {
+    changed: result.changed,
+    file: result.file,
+    ...result.backup ? { backup: result.backup } : {},
+    dryRun: opts.dryRun === true,
+    detail: result.changed ? `${opts.skill} \u2192 ${opts.visibility} in ${result.file}` : `${opts.skill} was already ${opts.visibility}`
+  };
+}
+async function setSkillEnabled(opts) {
+  const client = await resolveClient(
+    opts,
+    (inventory) => inventory.skills.filter((skill) => skill.qualifiedName === opts.skill || skill.name === opts.skill)
+  );
+  const move = client === "claude" ? await setSkillDirectoryEnabled({
+    skill: opts.skill,
+    enabled: opts.enabled,
+    projectRoot: opts.projectRoot,
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  }) : client === "codex" ? await (await Promise.resolve().then(() => (init_codex(), codex_exports))).setSkillDirectoryEnabled({
+    skill: opts.skill,
+    enabled: opts.enabled,
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  }) : void 0;
+  if (!move) {
+    throw new Error(
+      `Cursor has no enable/disable for skills. Move ${opts.skill} out of its skills directory by hand.`
+    );
+  }
+  return {
+    changed: move.moved,
+    file: move.to,
+    dryRun: opts.dryRun === true,
+    detail: move.moved ? `moved ${move.from} \u2192 ${move.to}` : opts.dryRun ? `would move ${move.from} \u2192 ${move.to}` : `${opts.skill} was already ${opts.enabled ? "enabled" : "disabled"}`
+  };
+}
+async function setPluginEnabled2(opts) {
+  const client = await resolveClient(
+    opts,
+    (inventory) => inventory.plugins.filter((plugin) => plugin.qualifiedName === opts.plugin || plugin.name === opts.plugin)
+  );
+  if (client !== "claude") {
+    throw new Error(
+      `Only Claude Code stores plugin enablement in settings. Use \`${client} plugin ${opts.enabled ? "add" : "remove"} ${opts.plugin}\`.`
+    );
+  }
+  const result = await setPluginEnabled({
+    plugin: opts.plugin,
+    enabled: opts.enabled,
+    projectRoot: opts.projectRoot,
+    ...opts.scope ? { scope: opts.scope } : {},
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  });
+  return {
+    changed: result.changed,
+    file: result.file,
+    ...result.backup ? { backup: result.backup } : {},
+    dryRun: opts.dryRun === true,
+    detail: result.changed ? `${opts.plugin} ${opts.enabled ? "enabled" : "disabled"} in ${result.file}` : `${opts.plugin} was already ${opts.enabled ? "enabled" : "disabled"}`
+  };
+}
+async function setMcpEnabled2(opts) {
+  const client = await resolveClient(
+    opts,
+    (inventory) => inventory.mcpServers.filter((server) => server.name === opts.server)
+  );
+  if (client === "cursor") {
+    const result2 = await setMcpServerEnabled({
+      server: opts.server,
+      enabled: opts.enabled,
+      scope: opts.scope === "project" ? "project" : "user",
+      projectRoot: opts.projectRoot,
+      ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+    });
+    return {
+      changed: result2.changed,
+      file: result2.file,
+      ...result2.backup ? { backup: result2.backup } : {},
+      dryRun: opts.dryRun === true,
+      detail: result2.changed ? `${opts.server} ${opts.enabled ? "restored to" : "parked out of"} mcpServers in ${result2.file}` : `${opts.server} was already ${opts.enabled ? "enabled" : "disabled"}`
+    };
+  }
+  if (client === "codex") {
+    throw new Error(
+      `Codex owns ~/.codex/config.toml. Use \`codex mcp ${opts.enabled ? "add" : "remove"} ${opts.server}\` so its formatting and comments survive.`
+    );
+  }
+  const result = await setMcpEnabled({
+    server: opts.server,
+    enabled: opts.enabled,
+    projectRoot: opts.projectRoot,
+    ...opts.scope ? { scope: opts.scope } : {},
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  });
+  return {
+    changed: result.changed,
+    file: result.file,
+    ...result.backup ? { backup: result.backup } : {},
+    dryRun: opts.dryRun === true,
+    detail: result.changed ? `${opts.server} ${opts.enabled ? "approved" : "rejected"} in ${result.file}` : `${opts.server} was already ${opts.enabled ? "enabled" : "disabled"}`
+  };
+}
+async function resolveClient(opts, matches) {
+  if (opts.client) {
+    return opts.client;
+  }
+  const inventory = opts.inventory ?? await scanEnvironment(opts.projectRoot);
+  const found = matches(inventory);
+  const clients = [...new Set(found.map((item) => item.client))];
+  if (clients.length === 1 && clients[0]) {
+    return clients[0];
+  }
+  if (clients.length === 0) {
+    throw new Error("not found in any installed client \u2014 run `yard scan` to see what is there");
+  }
+  throw new Error(
+    `ambiguous across ${clients.join(", ")} \u2014 pass --client to choose (matched ${found.map((item) => item.id).join(", ")})`
+  );
+}
+
+// src/cli/mutate.ts
+var MUTATION_FLAGS = [...GLOBAL_FLAGS, "client", "scope", "dry-run"];
+var ACTION_SCOPES = ["user", "project", "local"];
+function mutationOptions(args) {
+  const common = commonOptions(args);
+  const scope = flagEnum(args, "scope", ACTION_SCOPES);
+  return {
+    projectRoot: common.projectRoot,
+    json: common.json,
+    dryRun: flagBool(args, "dry-run"),
+    ...common.client ? { client: common.client } : {},
+    ...scope ? { scope } : {}
+  };
+}
+function actionInput(options) {
+  return {
+    projectRoot: options.projectRoot,
+    dryRun: options.dryRun,
+    ...options.client ? { client: options.client } : {},
+    ...options.scope ? { scope: options.scope } : {}
+  };
+}
+function parseToggle(args, usage) {
+  const [first, second, extra] = args.positionals;
+  if (extra !== void 0) {
+    throw new CliError(`unexpected argument "${extra}" \u2014 usage: ${usage}`);
+  }
+  if (!first || !second) {
+    throw new CliError(`usage: ${usage}`);
+  }
+  const action = isAction(first) ? first : isAction(second) ? second : void 0;
+  if (!action) {
+    throw new CliError(`expected enable or disable \u2014 usage: ${usage}`);
+  }
+  const name = action === first ? second : first;
+  return { name, enabled: action === "enable" };
+}
+function isAction(value) {
+  return value === "enable" || value === "disable";
+}
+function reportAction(result, options) {
+  if (options.json) {
+    console.log(renderJson(result));
+    return 0;
+  }
+  const style = createStyle(colorEnabled(options.json));
+  if (result.dryRun) {
+    console.log(style.dim("dry run, nothing was written"));
+  }
+  console.log(result.detail);
+  if (result.file) {
+    console.log(style.dim(`file    ${shortenPath(result.file, options.projectRoot)}`));
+  }
+  if (result.backup) {
+    console.log(style.dim(`backup  ${shortenPath(result.backup, options.projectRoot)}`));
+  }
+  return 0;
+}
+
+// src/cli/mcp.ts
+async function runMcp(args) {
+  rejectUnknownFlags(args, MUTATION_FLAGS);
+  const options = mutationOptions(args);
+  const toggle = parseToggle(args, "yard mcp enable|disable <name>");
+  const result = await setMcpEnabled2({
+    ...actionInput(options),
+    server: toggle.name,
+    enabled: toggle.enabled
+  });
+  return reportAction(result, options);
+}
+
+// src/cli/new.ts
+async function runNew(args) {
+  rejectUnknownFlags(args, [...GLOBAL_FLAGS]);
+  const options = commonOptions(args);
+  const [name, ...rest] = args.positionals;
+  const description = rest.join(" ").trim();
+  if (!name || !description) {
+    throw new CliError("usage: yard new <name> <description>");
+  }
+  const dest = await createPlugin({ name, description });
+  if (options.json) {
+    console.log(renderJson({ name, description, dest }));
+    return 0;
+  }
+  console.log(`created ${shortenPath(dest, options.projectRoot)}`);
+  return 0;
+}
+
+// src/cli/plugin.ts
+async function runPlugin(args) {
+  rejectUnknownFlags(args, MUTATION_FLAGS);
+  const options = mutationOptions(args);
+  const toggle = parseToggle(args, "yard plugin enable|disable <name>");
+  const result = await setPluginEnabled2({
+    ...actionInput(options),
+    plugin: toggle.name,
+    enabled: toggle.enabled
+  });
+  return reportAction(result, options);
+}
+
+// src/cli/scan.ts
+var SCAN_KINDS = ["skill", "plugin", "mcp", "hook", "agent", "command", "memory"];
+var KIND_HEADINGS = {
+  skill: "skills",
+  plugin: "plugins",
+  mcp: "mcp",
+  hook: "hooks",
+  agent: "agents",
+  command: "commands",
+  memory: "memory"
+};
+async function runScan(args) {
+  rejectUnknownFlags(args, [...GLOBAL_FLAGS, "client", "kind"]);
+  const options = commonOptions(args);
+  const kind = flagEnum(args, "kind", SCAN_KINDS);
+  const inventory = await scanEnvironment(options.projectRoot, {
+    ...options.client ? { clients: [options.client] } : {}
+  });
+  const rows = collectRows(inventory).filter((row) => !kind || row.kind === kind);
+  const counts = countByClient(inventory);
+  if (options.json) {
+    console.log(
+      renderJson({
+        projectRoot: inventory.projectRoot,
+        clients: inventory.clients,
+        counts,
+        items: rows,
+        warnings: inventory.warnings
+      })
+    );
+    return 0;
+  }
+  const style = createStyle(colorEnabled(options.json));
+  const head = (value) => style.dim(value);
+  if (!inventory.clients.length) {
+    console.log("no agent clients found on this machine");
+    return 0;
+  }
+  console.log(
+    renderTable(
+      [
+        { header: "client" },
+        ...SCAN_KINDS.map((name) => ({ header: KIND_HEADINGS[name], align: "right" }))
+      ],
+      [
+        ...inventory.clients.map((client) => [
+          client,
+          ...SCAN_KINDS.map((name) => String(counts[client]?.[name] ?? 0))
+        ]),
+        ...inventory.clients.length > 1 ? [["total", ...SCAN_KINDS.map((name) => String(totalFor(counts, name)))]] : []
+      ],
+      { headStyle: head }
+    )
+  );
+  console.log("");
+  if (!rows.length) {
+    console.log(kind ? `nothing of kind ${kind} is loaded` : "nothing is loaded");
+    return 0;
+  }
+  console.log(
+    renderTable(
+      [
+        { header: "kind" },
+        { header: "client" },
+        { header: "scope" },
+        { header: "name", max: 44 },
+        { header: "state" },
+        { header: "source", max: 58 }
+      ],
+      rows.map((row) => [
+        row.kind,
+        row.client,
+        row.scope,
+        row.name,
+        stateLabel(row.state, style.dim, style.green),
+        shortenPath(row.file, inventory.projectRoot)
+      ]),
+      { headStyle: head }
+    )
+  );
+  if (inventory.warnings.length) {
+    console.log("");
+    console.log(
+      style.dim(`${plural(inventory.warnings.length, "config file")} could not be read \u2014 run yard doctor`)
+    );
+  }
+  return 0;
+}
+function stateLabel(state, dim, green) {
+  if (!state) {
+    return dim("\u2014");
+  }
+  return state === "off" || state === "disabled" ? dim(state) : green(state);
+}
+function collectRows(inventory) {
+  const rows = [];
+  for (const skill of inventory.skills) {
+    rows.push({
+      kind: "skill",
+      id: skill.id,
+      client: skill.client,
+      scope: skill.scope,
+      name: skill.qualifiedName,
+      state: skill.visibility,
+      file: skill.file
+    });
+  }
+  for (const plugin of inventory.plugins) {
+    rows.push({
+      kind: "plugin",
+      id: plugin.id,
+      client: plugin.client,
+      scope: plugin.scope,
+      name: plugin.qualifiedName,
+      state: plugin.enabled ? plugin.installed ? "enabled" : "missing" : "disabled",
+      file: plugin.root ?? plugin.enabledSource ?? ""
+    });
+  }
+  for (const server of inventory.mcpServers) {
+    rows.push({
+      kind: "mcp",
+      id: server.id,
+      client: server.client,
+      scope: server.scope,
+      name: `${server.name} (${server.transport})`,
+      state: server.enabled ? "enabled" : "disabled",
+      file: server.file
+    });
+  }
+  for (const hook of inventory.hooks) {
+    rows.push({
+      kind: "hook",
+      id: hook.id,
+      client: hook.client,
+      scope: hook.scope,
+      name: hook.matcher ? `${hook.event}:${hook.matcher}` : hook.event,
+      state: hook.enabled ? "enabled" : "disabled",
+      file: hook.file
+    });
+  }
+  for (const agent of inventory.agents) {
+    rows.push({
+      kind: "agent",
+      id: agent.id,
+      client: agent.client,
+      scope: agent.scope,
+      name: agent.name,
+      state: "",
+      file: agent.file
+    });
+  }
+  for (const command of inventory.commands) {
+    rows.push({
+      kind: "command",
+      id: command.id,
+      client: command.client,
+      scope: command.scope,
+      name: command.name,
+      state: "",
+      file: command.file
+    });
+  }
+  for (const memory of inventory.memory) {
+    rows.push({
+      kind: "memory",
+      id: memory.id,
+      client: memory.client,
+      scope: memory.scope,
+      name: memory.name,
+      state: "",
+      file: memory.file
+    });
+  }
+  return rows;
+}
+function countByClient(inventory) {
+  const counts = {};
+  for (const client of inventory.clients) {
+    counts[client] = { skill: 0, plugin: 0, mcp: 0, hook: 0, agent: 0, command: 0, memory: 0 };
+  }
+  for (const row of collectRows(inventory)) {
+    const bucket = counts[row.client];
+    if (bucket) {
+      bucket[row.kind] += 1;
+    }
+  }
+  return counts;
+}
+function totalFor(counts, kind) {
+  return Object.values(counts).reduce((sum, bucket) => sum + (bucket?.[kind] ?? 0), 0);
+}
 
 // node_modules/@hono/node-server/dist/index.mjs
 import { createServer as createServerHTTP } from "http";
@@ -649,7 +6258,7 @@ var serve = (options, listeningListener) => {
 var __create = Object.create;
 var __defProp2 = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getOwnPropNames2 = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
@@ -668,7 +6277,7 @@ var __exportAll = (all, symbols) => {
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
-    for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key; i < n; i++) {
+    for (var keys = __getOwnPropNames2(from), i = 0, n = keys.length, key; i < n; i++) {
       key = keys[i];
       if (!__hasOwnProp.call(to, key) && key !== except) {
         __defProp2(to, key, {
@@ -946,10 +6555,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path17) {
+  if (!path17)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path17.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1358,11 +6967,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path17, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path17);
     return iss;
   });
 }
@@ -1509,16 +7118,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path8 = []) => {
+  const processError = (error3, path17 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path17, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path17, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -9890,9 +15499,9 @@ var rev2026Codec = {
     });
     const parsed = buildSchemas2026().RequestMetaEnvelopeSchema.safeParse(meta2);
     if (!parsed.success) for (const issue2 of parsed.error.issues) {
-      const path8 = issue2.path.map(String);
-      const key = path8.length > 0 ? path8.join(".") : "_meta";
-      if (path8.length === 1 && issues.some((existing) => existing.key === key && existing.problem === "missing")) continue;
+      const path17 = issue2.path.map(String);
+      const key = path17.length > 0 ? path17.join(".") : "_meta";
+      if (path17.length === 1 && issues.some((existing) => existing.key === key && existing.problem === "missing")) continue;
       issues.push({
         key,
         problem: issue2.message
@@ -10215,29 +15824,29 @@ var PERMITTED_X_MCP_HEADER_TYPES = /* @__PURE__ */ new Set([
 function scanXMcpHeaderDeclarations(inputSchema) {
   const declarations = [];
   const seenLower = /* @__PURE__ */ new Map();
-  const visit = (node, path8, reachable) => {
+  const visit = (node, path17, reachable) => {
     if (node === null || typeof node !== "object") return void 0;
     const schema = node;
     if (X_MCP_HEADER_KEY in schema) {
-      if (!reachable || path8.length === 0) return `${pathName(path8)}: x-mcp-header is only permitted on properties statically reachable via a chain of 'properties' keys (not under items, additionalProperties, oneOf/anyOf/allOf/not, if/then/else, or $ref)`;
+      if (!reachable || path17.length === 0) return `${pathName(path17)}: x-mcp-header is only permitted on properties statically reachable via a chain of 'properties' keys (not under items, additionalProperties, oneOf/anyOf/allOf/not, if/then/else, or $ref)`;
       const raw2 = schema[X_MCP_HEADER_KEY];
-      if (typeof raw2 !== "string" || raw2.length === 0) return `${pathName(path8)}: x-mcp-header MUST be a non-empty string`;
-      if (!RFC9110_TOKEN.test(raw2)) return `${pathName(path8)}: x-mcp-header '${raw2}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
+      if (typeof raw2 !== "string" || raw2.length === 0) return `${pathName(path17)}: x-mcp-header MUST be a non-empty string`;
+      if (!RFC9110_TOKEN.test(raw2)) return `${pathName(path17)}: x-mcp-header '${raw2}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
       const type = typeof schema.type === "string" ? schema.type : void 0;
-      if (type === void 0 || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) return `${pathName(path8)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
+      if (type === void 0 || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) return `${pathName(path17)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
       const lower = raw2.toLowerCase();
       const prior = seenLower.get(lower);
       if (prior !== void 0) return `x-mcp-header '${raw2}' is not case-insensitively unique (also declared as '${prior}')`;
       seenLower.set(lower, raw2);
       declarations.push({
-        path: path8,
+        path: path17,
         headerName: raw2,
         type
       });
     }
     const properties = schema.properties;
     if (properties !== null && typeof properties === "object") for (const [key, child] of Object.entries(properties)) {
-      const fault$1 = visit(child, [...path8, key], reachable);
+      const fault$1 = visit(child, [...path17, key], reachable);
       if (fault$1 !== void 0) return fault$1;
     }
     for (const k of NON_REACHABLE_SUBSCHEMA_KEYWORDS) {
@@ -10245,7 +15854,7 @@ function scanXMcpHeaderDeclarations(inputSchema) {
       if (sub === void 0) continue;
       const branches = Array.isArray(sub) ? sub : sub !== null && typeof sub === "object" && OBJECT_VALUED_SUBSCHEMA_KEYWORDS.has(k) ? Object.values(sub) : [sub];
       for (const branch of branches) {
-        const fault$1 = visit(branch, [...path8, `<${k}>`], false);
+        const fault$1 = visit(branch, [...path17, `<${k}>`], false);
         if (fault$1 !== void 0) return fault$1;
       }
     }
@@ -10285,8 +15894,8 @@ var OBJECT_VALUED_SUBSCHEMA_KEYWORDS = /* @__PURE__ */ new Set([
   "$defs",
   "definitions"
 ]);
-function pathName(path8) {
-  return path8.length === 0 ? "<root>" : path8.join(".");
+function pathName(path17) {
+  return path17.length === 0 ? "<root>" : path17.join(".");
 }
 var BASE64_SENTINEL_PREFIX = "=?base64?";
 var BASE64_SENTINEL_SUFFIX = "?=";
@@ -10317,9 +15926,9 @@ function decodeMcpParamValue(value) {
     return;
   }
 }
-function valueAtPath(root, path8) {
+function valueAtPath(root, path17) {
   let node = root;
-  for (const key of path8) {
+  for (const key of path17) {
     if (node === null || typeof node !== "object") return void 0;
     node = node[key];
   }
@@ -10813,7 +16422,7 @@ var PROPERTY_KEYS_BY_TYPE = {
   array: shapeKeys([UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema])
 };
 var SUPPORTED_STRING_FORMATS = new Set(StringSchemaSchema.shape.format.unwrap().options);
-function walkProperty(node, path8, vendor, unsupported) {
+function walkProperty(node, path17, vendor, unsupported) {
   if (!isJsonObject(node)) return node;
   const allowedKeys = typeof node.type === "string" && Object.hasOwn(PROPERTY_KEYS_BY_TYPE, node.type) ? PROPERTY_KEYS_BY_TYPE[node.type] : void 0;
   if (allowedKeys === void 0) return node;
@@ -10821,8 +16430,8 @@ function walkProperty(node, path8, vendor, unsupported) {
   for (const [key, value] of Object.entries(node)) if (allowedKeys.has(key) || isAnnotationOnlyJsonSchemaKeyword(key)) pruned[key] = value;
   else if (key === "pattern" && node.type === "string" && typeof node.format === "string") {
     if (!SUPPORTED_STRING_FORMATS.has(node.format)) pruned[key] = value;
-    else if (typeof value !== "string" || !isLibraryFormatPattern(node.format, value, vendor)) unsupported.push(`${path8}.${key}`);
-  } else unsupported.push(`${path8}.${key}`);
+    else if (typeof value !== "string" || !isLibraryFormatPattern(node.format, value, vendor)) unsupported.push(`${path17}.${key}`);
+  } else unsupported.push(`${path17}.${key}`);
   return pruned;
 }
 function walkRequestedSchema(converted, vendor) {
@@ -10839,11 +16448,11 @@ function describeUnsupportedProperties(pruned, fallback) {
   const offenders = Object.entries(pruned.properties).filter(([, node]) => !parseSchema(PrimitiveSchemaDefinitionSchema, node).success).map(([name]) => `properties.${name}`);
   return offenders.length > 0 ? offenders.join(", ") : fallback;
 }
-function findDroppedConstraintPaths(original, parsed, path8 = "") {
-  if (Array.isArray(original) && Array.isArray(parsed)) return original.flatMap((item, index) => findDroppedConstraintPaths(item, parsed[index], `${path8}[${index}]`));
+function findDroppedConstraintPaths(original, parsed, path17 = "") {
+  if (Array.isArray(original) && Array.isArray(parsed)) return original.flatMap((item, index) => findDroppedConstraintPaths(item, parsed[index], `${path17}[${index}]`));
   if (!isJsonObject(original) || !isJsonObject(parsed)) return [];
   return Object.entries(original).flatMap(([key, value]) => {
-    const childPath = path8 ? `${path8}.${key}` : key;
+    const childPath = path17 ? `${path17}.${key}` : key;
     if (!Object.prototype.hasOwnProperty.call(parsed, key)) return isAnnotationOnlyJsonSchemaKeyword(key) ? [] : [childPath];
     return findDroppedConstraintPaths(value, parsed[key], childPath);
   });
@@ -12734,9 +18343,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
       return `${varKind} ${this.name}${rhs};` + _n;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       if (!names[this.name.str]) return;
-      if (this.rhs) this.rhs = optimizeExpr(this.rhs, names, constants);
+      if (this.rhs) this.rhs = optimizeExpr(this.rhs, names, constants2);
       return this;
     }
     get names() {
@@ -12753,9 +18362,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
     render({ _n }) {
       return `${this.lhs} = ${this.rhs};` + _n;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects) return;
-      this.rhs = optimizeExpr(this.rhs, names, constants);
+      this.rhs = optimizeExpr(this.rhs, names, constants2);
       return this;
     }
     get names() {
@@ -12814,8 +18423,8 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
     optimizeNodes() {
       return `${this.code}` ? this : void 0;
     }
-    optimizeNames(names, constants) {
-      this.code = optimizeExpr(this.code, names, constants);
+    optimizeNames(names, constants2) {
+      this.code = optimizeExpr(this.code, names, constants2);
       return this;
     }
     get names() {
@@ -12841,12 +18450,12 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       }
       return nodes.length > 0 ? this : void 0;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       const { nodes } = this;
       let i = nodes.length;
       while (i--) {
         const n = nodes[i];
-        if (n.optimizeNames(names, constants)) continue;
+        if (n.optimizeNames(names, constants2)) continue;
         subtractNames(names, n.names);
         nodes.splice(i, 1);
       }
@@ -12893,11 +18502,11 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       if (cond === false || !this.nodes.length) return void 0;
       return this;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       var _a3;
-      this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants);
-      if (!(super.optimizeNames(names, constants) || this.else)) return;
-      this.condition = optimizeExpr(this.condition, names, constants);
+      this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants2);
+      if (!(super.optimizeNames(names, constants2) || this.else)) return;
+      this.condition = optimizeExpr(this.condition, names, constants2);
       return this;
     }
     get names() {
@@ -12919,9 +18528,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
     render(opts) {
       return `for(${this.iteration})` + super.render(opts);
     }
-    optimizeNames(names, constants) {
-      if (!super.optimizeNames(names, constants)) return;
-      this.iteration = optimizeExpr(this.iteration, names, constants);
+    optimizeNames(names, constants2) {
+      if (!super.optimizeNames(names, constants2)) return;
+      this.iteration = optimizeExpr(this.iteration, names, constants2);
       return this;
     }
     get names() {
@@ -12956,9 +18565,9 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
     render(opts) {
       return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
     }
-    optimizeNames(names, constants) {
-      if (!super.optimizeNames(names, constants)) return;
-      this.iterable = optimizeExpr(this.iterable, names, constants);
+    optimizeNames(names, constants2) {
+      if (!super.optimizeNames(names, constants2)) return;
+      this.iterable = optimizeExpr(this.iterable, names, constants2);
       return this;
     }
     get names() {
@@ -12997,11 +18606,11 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       (_b = this.finally) === null || _b === void 0 || _b.optimizeNodes();
       return this;
     }
-    optimizeNames(names, constants) {
+    optimizeNames(names, constants2) {
       var _a3, _b;
-      super.optimizeNames(names, constants);
-      (_a3 = this.catch) === null || _a3 === void 0 || _a3.optimizeNames(names, constants);
-      (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants);
+      super.optimizeNames(names, constants2);
+      (_a3 = this.catch) === null || _a3 === void 0 || _a3.optimizeNames(names, constants2);
+      (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants2);
       return this;
     }
     get names() {
@@ -13250,7 +18859,7 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
   function addExprNames(names, from) {
     return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
   }
-  function optimizeExpr(expr, names, constants) {
+  function optimizeExpr(expr, names, constants2) {
     if (expr instanceof code_1.Name) return replaceName(expr);
     if (!canOptimize(expr)) return expr;
     return new code_1._Code(expr._items.reduce((items, c) => {
@@ -13260,13 +18869,13 @@ var require_codegen = /* @__PURE__ */ __commonJSMin(((exports) => {
       return items;
     }, []));
     function replaceName(n) {
-      const c = constants[n.str];
+      const c = constants2[n.str];
       if (c === void 0 || names[n.str] !== 1) return n;
       delete names[n.str];
       return c;
     }
     function canOptimize(e) {
-      return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+      return e instanceof code_1._Code && e._items.some((c) => c instanceof code_1.Name && names[c.str] === 1 && constants2[c.str] !== void 0);
     }
   }
   function subtractNames(names, from) {
@@ -14672,8 +20281,8 @@ var require_validate = /* @__PURE__ */ __commonJSMin(((exports) => {
     ok(cond) {
       if (!this.allErrors) this.gen.if(cond);
     }
-    setParams(obj, assign) {
-      if (assign) Object.assign(this.params, obj);
+    setParams(obj, assign2) {
+      if (assign2) Object.assign(this.params, obj);
       else this.params = obj;
     }
     block$data(valid, codeBlock, $dataValid = codegen_1.nil) {
@@ -15137,8 +20746,8 @@ var require_utils = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     for (let i = 0; i < str.length; i++) if (str[i] === token) ind++;
     return ind;
   }
-  function removeDotSegments(path8) {
-    let input = path8;
+  function removeDotSegments(path17) {
+    let input = path17;
     const output = [];
     let nextSlash = -1;
     let len = 0;
@@ -15291,8 +20900,8 @@ var require_schemes = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       wsComponent.secure = void 0;
     }
     if (wsComponent.resourceName) {
-      const [path8, query] = wsComponent.resourceName.split("?");
-      wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
+      const [path17, query] = wsComponent.resourceName.split("?");
+      wsComponent.path = path17 && path17 !== "/" ? path17 : void 0;
       wsComponent.query = query;
       wsComponent.resourceName = void 0;
     }
@@ -19564,8 +25173,8 @@ data: ${JSON.stringify({
         writeNotification(ack.method, ack.params);
         unsubscribe = bus.subscribe((event) => {
           if (closed || !listenFilterAccepts(honored, event)) return;
-          const note = stampSubscriptionId(serverEventToNotification(event), subscriptionId);
-          writeNotification(note.method, note.params);
+          const note2 = stampSubscriptionId(serverEventToNotification(event), subscriptionId);
+          writeNotification(note2.method, note2.params);
         });
         keepAliveTimer = armSseKeepAlive(keepAliveMs, () => writeFrame(": keepalive\n\n"));
         open.add(teardown);
@@ -21586,903 +27195,14 @@ function toError(value) {
   return value instanceof Error ? value : new Error(String(value));
 }
 
-// src/cli.ts
+// src/cli/serve.ts
 import { existsSync as existsSync3, watch } from "node:fs";
 
-// src/adapt.ts
-import { cp as cp2, mkdir as mkdir2, readFile as readFile3, readdir as readdir2, stat as stat2, writeFile as writeFile3 } from "node:fs/promises";
-import path4 from "node:path";
-
-// src/frontmatter.ts
-var FENCE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
-function parseFrontmatter(raw2) {
-  const match2 = FENCE.exec(raw2);
-  if (!match2) {
-    return { data: {}, body: raw2 };
-  }
-  const data = {};
-  let pendingKey;
-  let pendingLines = [];
-  const flush = () => {
-    if (!pendingKey) {
-      return;
-    }
-    data[pendingKey] = pendingLines.join(" ").replace(/\s+/g, " ").trim();
-    pendingKey = void 0;
-    pendingLines = [];
-  };
-  for (const line of match2[1]?.split(/\r?\n/) ?? []) {
-    const keyed = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
-    if (keyed) {
-      flush();
-      const key = keyed[1];
-      const value = keyed[2] ?? "";
-      if (!key) {
-        continue;
-      }
-      if (value === ">" || value === "|") {
-        pendingKey = key;
-        pendingLines = [];
-        continue;
-      }
-      data[key] = stripQuotes(value);
-      continue;
-    }
-    if (pendingKey && /^\s+/.test(line)) {
-      pendingLines.push(line.trim());
-      continue;
-    }
-  }
-  flush();
-  return { data, body: raw2.slice(match2[0].length) };
-}
-function stripQuotes(value) {
-  if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
-// src/mcp-spec.ts
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
-var AGENT_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
-var YARD_MCP_SERVERS = [
-  {
-    key: "yard",
-    description: "Yard control plane. Search, hydrate, and attach marketplace artifacts over stdio.",
-    command: "node",
-    claudeArgs: ["${CLAUDE_PLUGIN_ROOT}/dist/cli.js", "--stdio"],
-    agentArgs: ["./dist/cli.js", "--stdio"],
-    claudeEnv: { YARD_ROOT: "${CLAUDE_PROJECT_DIR}" },
-    agentCwd: "./"
-  }
-];
-function emitClaudeMcp(servers = YARD_MCP_SERVERS) {
-  return {
-    mcpServers: Object.fromEntries(
-      servers.map((server) => [
-        server.key,
-        {
-          command: server.command,
-          args: server.claudeArgs,
-          ...server.claudeEnv ? { env: server.claudeEnv } : {}
-        }
-      ])
-    )
-  };
-}
-function emitAgentMcp(servers = YARD_MCP_SERVERS) {
-  return {
-    $schema: AGENT_MCP_SCHEMA,
-    mcpServers: Object.fromEntries(
-      servers.map((server) => [
-        server.key,
-        {
-          type: "stdio",
-          command: server.command,
-          args: server.agentArgs,
-          ...server.agentCwd ? { cwd: server.agentCwd } : {}
-        }
-      ])
-    )
-  };
-}
-async function writeMcpFiles(pluginRoot, servers = YARD_MCP_SERVERS) {
-  await mkdir(pluginRoot, { recursive: true });
-  await writeFile(path.join(pluginRoot, ".mcp.json"), `${JSON.stringify(emitClaudeMcp(servers), null, 2)}
-`);
-  await writeFile(path.join(pluginRoot, "mcp.json"), `${JSON.stringify(emitAgentMcp(servers), null, 2)}
-`);
-}
-async function parsePluginMcp(pluginName, pluginRoot) {
-  const claudePath = path.join(pluginRoot, ".mcp.json");
-  const agentPath = path.join(pluginRoot, "mcp.json");
-  const claudeRaw = await readOptionalJson(claudePath);
-  const agentRaw = await readOptionalJson(agentPath);
-  const claudeKeys = claudeRaw ? serverKeys(claudeRaw) : [];
-  const agentKeys = agentRaw ? serverKeys(agentRaw) : [];
-  if (claudeRaw && !agentRaw) {
-    throw new Error(`${pluginName} has .mcp.json but no mcp.json`);
-  }
-  if (agentRaw && !claudeRaw) {
-    throw new Error(`${pluginName} has mcp.json but no .mcp.json`);
-  }
-  if (!claudeRaw || !agentRaw) {
-    return [];
-  }
-  if (JSON.stringify(claudeKeys) !== JSON.stringify(agentKeys)) {
-    throw new Error(`${pluginName} MCP server keys diverge: ${claudeKeys.join(",")} vs ${agentKeys.join(",")}`);
-  }
-  return claudeKeys.map((key) => {
-    const claude = lookupServer(claudeRaw, key);
-    return {
-      key,
-      plugin: pluginName,
-      transport: transportFromClaude(claude),
-      source: "claude"
-    };
-  });
-}
-function serverKeys(raw2) {
-  if (!raw2 || typeof raw2 !== "object") {
-    return [];
-  }
-  const record2 = raw2;
-  const wrapped = record2.mcpServers;
-  if (wrapped && typeof wrapped === "object" && !Array.isArray(wrapped)) {
-    return Object.keys(wrapped).sort();
-  }
-  return Object.keys(record2).filter((key) => key !== "$schema").sort();
-}
-function lookupServer(raw2, key) {
-  if (!raw2 || typeof raw2 !== "object") {
-    return {};
-  }
-  const record2 = raw2;
-  const wrapped = record2.mcpServers;
-  if (wrapped && typeof wrapped === "object" && !Array.isArray(wrapped)) {
-    return wrapped[key] ?? {};
-  }
-  return record2[key] ?? {};
-}
-function transportFromClaude(entry) {
-  if (entry.url || entry.type === "http" || entry.type === "streamable-http" || entry.type === "sse") {
-    return { type: "http", url: entry.url ?? "" };
-  }
-  return {
-    type: "stdio",
-    command: entry.command ?? "node",
-    args: entry.args ?? [],
-    ...entry.env ? { env: entry.env } : {},
-    ...entry.cwd ? { cwd: entry.cwd } : {}
-  };
-}
-async function readOptionalJson(file) {
-  try {
-    return JSON.parse(await readFile(file, "utf8"));
-  } catch {
-    return void 0;
-  }
-}
-
-// src/paths.ts
-import { existsSync } from "node:fs";
-import path2 from "node:path";
-import { fileURLToPath } from "node:url";
-var HERE = path2.dirname(fileURLToPath(import.meta.url));
-function findMarketplaceRoot(start) {
-  let dir = path2.resolve(start);
-  for (; ; ) {
-    if (existsSync(path2.join(dir, ".claude-plugin", "marketplace.json"))) {
-      return dir;
-    }
-    const parent = path2.dirname(dir);
-    if (parent === dir) {
-      return void 0;
-    }
-    dir = parent;
-  }
-}
-function resolveRepoRoot() {
-  if (process.env.YARD_ROOT) {
-    return path2.resolve(process.env.YARD_ROOT);
-  }
-  const projectDir = process.env.CLAUDE_PROJECT_DIR;
-  if (projectDir) {
-    const fromProject = findMarketplaceRoot(projectDir);
-    if (fromProject) {
-      return fromProject;
-    }
-  }
-  return findMarketplaceRoot(process.cwd()) ?? findMarketplaceRoot(HERE) ?? process.cwd();
-}
-function resolvePublicDir(root) {
-  const yardPublic = path2.join(root, "plugins", "yard", "public");
-  if (existsSync(path2.join(yardPublic, "index.html"))) {
-    return yardPublic;
-  }
-  const beside = path2.resolve(HERE, "..", "public");
-  if (existsSync(path2.join(beside, "index.html"))) {
-    return beside;
-  }
-  return path2.join(root, "public");
-}
-var REPO_ROOT = resolveRepoRoot();
-var SERVER_DIR = path2.resolve(HERE, "..");
-var CLAUDE_MARKETPLACE = path2.join(REPO_ROOT, ".claude-plugin", "marketplace.json");
-var CODEX_MARKETPLACE = path2.join(REPO_ROOT, ".agents", "plugins", "marketplace.json");
-var CURSOR_MARKETPLACE = path2.join(REPO_ROOT, ".cursor-plugin", "marketplace.json");
-var PLUGINS_DIR = path2.join(REPO_ROOT, "plugins");
-var TEMPLATE_DIR = path2.join(REPO_ROOT, "templates", "plugin");
-var PUBLIC_DIR = resolvePublicDir(REPO_ROOT);
-var YARD_DIR = path2.join(REPO_ROOT, ".yard");
-var SESSION_FILE = path2.join(YARD_DIR, "state.json");
-var YARD_PLUGIN_DIR = path2.join(REPO_ROOT, "plugins", "yard");
-
-// src/scaffold.ts
-import { cp, readdir, readFile as readFile2, rename, stat, writeFile as writeFile2 } from "node:fs/promises";
-import path3 from "node:path";
-var NAME_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
-async function createPlugin(input) {
-  const name = input.name.trim();
-  const description = input.description.trim();
-  if (!NAME_RE.test(name)) {
-    throw new Error("plugin name must be kebab-case");
-  }
-  if (!description) {
-    throw new Error("description is required");
-  }
-  const dest = path3.join(PLUGINS_DIR, name);
-  await cp(TEMPLATE_DIR, dest, { recursive: true, errorOnExist: true });
-  await replaceInTree(dest, { PLUGIN_NAME: name, PLUGIN_DESCRIPTION: description });
-  await rename(path3.join(dest, "skills", "PLUGIN_NAME"), path3.join(dest, "skills", name));
-  await addCatalogEntries(name, description);
-  return dest;
-}
-async function replaceInTree(root, vars) {
-  const walk = async (dir) => {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const full = path3.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(full);
-        continue;
-      }
-      if (!(await stat(full)).isFile()) {
-        continue;
-      }
-      const raw2 = await readFile2(full, "utf8");
-      let next = raw2;
-      for (const [key, value] of Object.entries(vars)) {
-        next = next.split(key).join(value);
-      }
-      if (next !== raw2) {
-        await writeFile2(full, next);
-      }
-    }
-  };
-  await walk(root);
-}
-async function addCatalogEntries(name, description) {
-  const claude = JSON.parse(await readFile2(CLAUDE_MARKETPLACE, "utf8"));
-  const codex = JSON.parse(await readFile2(CODEX_MARKETPLACE, "utf8"));
-  const cursor = JSON.parse(await readFile2(CURSOR_MARKETPLACE, "utf8"));
-  let added = false;
-  if (!hasNamedPlugin(claude.plugins, name)) {
-    claude.plugins.push({
-      name,
-      source: `./plugins/${name}`,
-      description,
-      version: "0.1.0",
-      author: { name: "Ryan Yannelli", email: "ryanyannelli@gmail.com" },
-      category: "uncategorized",
-      tags: [name],
-      license: "MIT"
-    });
-    await writeFile2(CLAUDE_MARKETPLACE, `${JSON.stringify(claude, null, 2)}
-`);
-    added = true;
-  }
-  if (!hasNamedPlugin(codex.plugins, name)) {
-    codex.plugins.push({
-      name,
-      source: { source: "local", path: `./plugins/${name}` },
-      policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
-      category: "Productivity"
-    });
-    await writeFile2(CODEX_MARKETPLACE, `${JSON.stringify(codex, null, 2)}
-`);
-    added = true;
-  }
-  if (!hasNamedPlugin(cursor.plugins, name)) {
-    cursor.plugins.push({
-      name,
-      source: `./plugins/${name}`,
-      description,
-      version: "0.1.0",
-      category: "uncategorized",
-      tags: [name]
-    });
-    await writeFile2(CURSOR_MARKETPLACE, `${JSON.stringify(cursor, null, 2)}
-`);
-    added = true;
-  }
-  return added;
-}
-function hasNamedPlugin(plugins, name) {
-  return plugins.some((plugin) => plugin.name === name);
-}
-
-// src/adapt.ts
-var NAME_RE2 = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
-var AUTHOR = {
-  name: "Ryan Yannelli",
-  email: "ryanyannelli@gmail.com",
-  url: "https://github.com/yannelli"
-};
-var CLAUDE_TO_CURSOR_EVENTS = {
-  SessionStart: "sessionStart",
-  SessionEnd: "sessionEnd",
-  UserPromptSubmit: "beforeSubmitPrompt",
-  PreToolUse: "preToolUse",
-  PostToolUse: "postToolUse",
-  Notification: "notification",
-  Stop: "stop",
-  SubagentStop: "subagentStop"
-};
-var SUPPORT_DIRS = ["scripts", "rules", "agents", "commands", "hooks"];
-var SUPPORT_FILES = [".mcp.json", "mcp.json", "README.md", "LICENSE"];
-var FORBIDDEN_AGENT_ENV = /* @__PURE__ */ new Set(["PLUGIN_ROOT", "PLUGIN_DATA"]);
-async function adaptPlugin(input) {
-  const source = path4.resolve(input.source);
-  if (!await exists(source)) {
-    throw new Error(`adapt source not found: ${source}`);
-  }
-  const discovered = await discover(source, input.name);
-  const dest = path4.resolve(input.dest ?? path4.join(PLUGINS_DIR, discovered.name));
-  const destExisted = await exists(dest);
-  const destIsPlugin = path4.resolve(dest) === path4.resolve(PLUGINS_DIR, discovered.name);
-  const wrote = [];
-  const skipped = [];
-  const notes = [];
-  if (path4.resolve(source) !== dest) {
-    await mkdir2(dest, { recursive: true });
-    await copySkills(source, dest, discovered.name, wrote, skipped, notes);
-    await copySupport(source, dest, wrote, skipped, notes);
-  } else {
-    notes.push("adapting in place");
-  }
-  await adaptHooks(source, dest, wrote, skipped, notes);
-  await adaptMcp(source, dest, wrote, skipped, notes);
-  const seed = await seedFrom(source, dest, discovered);
-  for (const [rel, body] of Object.entries(manifestsFor(seed))) {
-    await writeMissing(dest, rel, body, wrote, skipped);
-  }
-  const register2 = destIsPlugin && (input.register ?? !destExisted);
-  let registered = false;
-  if (register2) {
-    registered = await addCatalogEntries(seed.name, seed.description);
-    notes.push(
-      registered ? "registered in the three marketplace catalogs" : "already present in the marketplace catalogs"
-    );
-  } else if (input.register === true && !destIsPlugin) {
-    notes.push("skipped catalog registration because dest is not plugins/<name>");
-  }
-  return { dest, name: seed.name, wrote, skipped, notes, registered };
-}
-function kebabName(value) {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-function claudeHooksToCursor(raw2) {
-  const events = hookEvents(raw2);
-  const hooks = {};
-  for (const [event, entries] of Object.entries(events)) {
-    const mapped = CLAUDE_TO_CURSOR_EVENTS[event] ?? camelCase(event);
-    const commands = entries.flatMap(extractCommands).map(toCursorCommand).filter((command) => command.length > 0).map((command) => ({ command }));
-    if (commands.length) {
-      hooks[mapped] = commands;
-    }
-  }
-  return { hooks };
-}
-function cursorHooksToClaude(raw2) {
-  const events = hookEvents(raw2);
-  const hooks = {};
-  for (const [event, entries] of Object.entries(events)) {
-    const mapped = Object.entries(CLAUDE_TO_CURSOR_EVENTS).find(([, cursor]) => cursor === event)?.[0] ?? pascalCase(event);
-    const commands = entries.flatMap(extractCommands).map(toClaudeCommand).filter((command) => command.length > 0);
-    if (commands.length) {
-      hooks[mapped] = [{ hooks: commands.map((command) => ({ type: "command", command })) }];
-    }
-  }
-  return { description: "Adapted from Cursor hooks", hooks };
-}
-function claudeMcpToAgent(raw2) {
-  const servers = serverMap(raw2);
-  return {
-    $schema: AGENT_MCP_SCHEMA,
-    mcpServers: Object.fromEntries(Object.entries(servers).map(([key, entry]) => [key, toAgentEntry(entry)]))
-  };
-}
-function agentMcpToClaude(raw2) {
-  const servers = serverMap(raw2);
-  return {
-    mcpServers: Object.fromEntries(
-      Object.entries(servers).map(([key, entry]) => {
-        const record2 = entry;
-        if (typeof record2.url === "string" && record2.url) {
-          return [key, { url: record2.url, type: String(record2.type ?? "http") }];
-        }
-        const args = Array.isArray(record2.args) ? record2.args.map((arg) => toClaudePath(String(arg))) : [];
-        const env = claudeEnv(record2.env);
-        return [
-          key,
-          {
-            command: typeof record2.command === "string" ? record2.command : "node",
-            args,
-            ...env ? { env } : {}
-          }
-        ];
-      })
-    )
-  };
-}
-async function discover(source, explicit) {
-  const skill = await findSkillFile(source);
-  const claude = await readJson(path4.join(dirOf(source), ".claude-plugin", "plugin.json"));
-  const rootManifest = await readJson(path4.join(dirOf(source), "plugin.json"));
-  const fromSkill = skill ? parseFrontmatter(await readFile3(skill, "utf8")).data : {};
-  const rawName = explicit ?? stringField(claude, "name") ?? stringField(rootManifest, "name") ?? fromSkill.name ?? path4.basename(skill ? path4.dirname(skill) : dirOf(source), ".md");
-  const name = kebabName(rawName);
-  if (!NAME_RE2.test(name)) {
-    throw new Error(`could not derive a kebab-case plugin name from ${source}`);
-  }
-  const description = stringField(claude, "description") ?? stringField(rootManifest, "description") ?? fromSkill.description ?? `${name} adapted from a Claude skill`;
-  return { name, description };
-}
-async function seedFrom(source, dest, discovered) {
-  const claude = await readJson(path4.join(dirOf(source), ".claude-plugin", "plugin.json")) ?? await readJson(path4.join(dest, ".claude-plugin", "plugin.json"));
-  const keywords = arrayField(claude, "keywords");
-  const hooksPath = await isFile(path4.join(dest, "hooks", "claude-hooks.json")) ? "./hooks/claude-hooks.json" : stringField(claude, "hooks");
-  const homepage = stringField(claude, "homepage");
-  const repository = stringField(claude, "repository");
-  const mcp = await readJson(path4.join(dest, "mcp.json")) ?? await readJson(path4.join(dest, ".mcp.json")) ?? (claude && "mcpServers" in claude ? { mcpServers: claude.mcpServers } : void 0);
-  return {
-    name: discovered.name,
-    description: discovered.description,
-    version: stringField(claude, "version") ?? "0.1.0",
-    keywords: keywords.length ? keywords : [discovered.name],
-    license: stringField(claude, "license") ?? "MIT",
-    ...homepage ? { homepage } : {},
-    ...repository ? { repository } : {},
-    ...hooksPath ? { hooks: hooksPath } : {},
-    ...mcp ? { mcpServers: toCodexInline(mcp) } : {}
-  };
-}
-function manifestsFor(seed) {
-  const shared = {
-    name: seed.name,
-    version: seed.version,
-    description: seed.description,
-    author: AUTHOR,
-    homepage: seed.homepage ?? "https://github.com/yannelli/skills",
-    repository: seed.repository ?? "https://github.com/yannelli/skills",
-    license: seed.license,
-    keywords: seed.keywords
-  };
-  const claude = {
-    $schema: "https://json.schemastore.org/claude-code-plugin-manifest.json",
-    ...shared,
-    ...seed.hooks ? { hooks: seed.hooks } : {}
-  };
-  const agent = {
-    $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-    ...shared
-  };
-  const cursor = {
-    name: shared.name,
-    description: shared.description,
-    version: shared.version,
-    author: { name: AUTHOR.name, email: AUTHOR.email },
-    homepage: shared.homepage,
-    repository: shared.repository,
-    license: shared.license,
-    keywords: shared.keywords
-  };
-  const codex = {
-    ...shared,
-    skills: "./skills/",
-    ...seed.hooks ? { hooks: seed.hooks } : {},
-    ...seed.mcpServers ? { mcpServers: seed.mcpServers } : {}
-  };
-  return {
-    "plugin.json": json(agent),
-    ".claude-plugin/plugin.json": json(claude),
-    ".codex-plugin/plugin.json": json(codex),
-    ".cursor-plugin/plugin.json": json(cursor)
-  };
-}
-async function copySkills(source, dest, name, wrote, skipped, notes) {
-  const destSkills = path4.join(dest, "skills");
-  if (await isDir(destSkills)) {
-    skipped.push("skills/");
-    return;
-  }
-  const sourceDir = dirOf(source);
-  const skillsDir = path4.join(sourceDir, "skills");
-  if (await isDir(skillsDir)) {
-    await cp2(skillsDir, destSkills, { recursive: true });
-    wrote.push("skills/");
-    notes.push("copied skills/ from the source plugin");
-    return;
-  }
-  const skill = await findSkillFile(source);
-  if (!skill) {
-    throw new Error(`no SKILL.md found under ${source}`);
-  }
-  const target = path4.join(dest, "skills", name, "SKILL.md");
-  await mkdir2(path4.dirname(target), { recursive: true });
-  await cp2(skill, target);
-  wrote.push(`skills/${name}/SKILL.md`);
-}
-async function copySupport(source, dest, wrote, skipped, notes) {
-  const sourceDir = dirOf(source);
-  if (!await looksLikePlugin(sourceDir)) {
-    return;
-  }
-  for (const dir of SUPPORT_DIRS) {
-    const from = path4.join(sourceDir, dir);
-    const to = path4.join(dest, dir);
-    if (!await isDir(from)) {
-      continue;
-    }
-    if (await exists(to)) {
-      skipped.push(`${dir}/`);
-      continue;
-    }
-    await cp2(from, to, { recursive: true });
-    wrote.push(`${dir}/`);
-  }
-  for (const file of SUPPORT_FILES) {
-    const from = path4.join(sourceDir, file);
-    if (await isFile(from)) {
-      await writeMissing(dest, file, await readFile3(from, "utf8"), wrote, skipped);
-    }
-  }
-  if (wrote.some((item) => SUPPORT_DIRS.includes(item.replace(/\/$/, "")))) {
-    notes.push("copied scripts, hooks, and other plugin support files");
-  }
-}
-async function adaptHooks(source, dest, wrote, skipped, notes) {
-  const sourceDir = dirOf(source);
-  const destClaude = path4.join(dest, "hooks", "claude-hooks.json");
-  const destCursor = path4.join(dest, "hooks", "hooks.json");
-  const claudeRaw = await firstClaudeHooks([
-    path4.join(sourceDir, "hooks", "claude-hooks.json"),
-    path4.join(sourceDir, ".claude-plugin", "hooks.json"),
-    path4.join(sourceDir, "hooks", "hooks.json"),
-    destClaude,
-    destCursor
-  ]);
-  const cursorRaw = await firstCursorHooks([
-    path4.join(sourceDir, "hooks", "hooks.json"),
-    destCursor
-  ]);
-  if (claudeRaw && await isClaudeNamedHooks(destCursor)) {
-    await writeMissing(dest, "hooks/claude-hooks.json", json(claudeRaw), wrote, skipped);
-    await writeFile3(destCursor, json(claudeHooksToCursor(claudeRaw)));
-    wrote.push("hooks/hooks.json");
-    notes.push("moved Claude-shaped hooks.json to claude-hooks.json and wrote Cursor hooks");
-    return;
-  }
-  if (claudeRaw) {
-    await writeMissing(dest, "hooks/hooks.json", json(claudeHooksToCursor(claudeRaw)), wrote, skipped);
-    if (!await exists(destClaude)) {
-      await writeMissing(dest, "hooks/claude-hooks.json", json(claudeRaw), wrote, skipped);
-    }
-    if (wrote.includes("hooks/hooks.json")) {
-      notes.push("wrote Cursor hooks from Claude hooks");
-    }
-  }
-  if (cursorRaw && !await exists(destClaude)) {
-    await writeMissing(dest, "hooks/claude-hooks.json", json(cursorHooksToClaude(cursorRaw)), wrote, skipped);
-    notes.push("wrote Claude hooks from Cursor hooks");
-  }
-}
-async function adaptMcp(source, dest, wrote, skipped, notes) {
-  const sourceDir = dirOf(source);
-  const sourceClaude = await readJson(path4.join(sourceDir, ".mcp.json"));
-  const sourceAgent = await readJson(path4.join(sourceDir, "mcp.json"));
-  const destClaudePath = path4.join(dest, ".mcp.json");
-  const destAgentPath = path4.join(dest, "mcp.json");
-  const destClaude = await readJson(destClaudePath);
-  const destAgent = await readJson(destAgentPath);
-  const pluginMcp = await pluginInlineMcp(sourceDir);
-  const claudeRaw = sourceClaude ?? destClaude ?? (isClaudeMcpShape(sourceAgent) ? sourceAgent : void 0) ?? pluginMcp;
-  const agentRaw = isAgentMcpShape(sourceAgent) ? sourceAgent : isAgentMcpShape(destAgent) ? destAgent : void 0;
-  if (claudeRaw && await isClaudeNamedMcp(destAgentPath)) {
-    await writeMissing(dest, ".mcp.json", json(normalizeClaudeMcp(claudeRaw)), wrote, skipped);
-    await writeFile3(destAgentPath, json(claudeMcpToAgent(claudeRaw)));
-    wrote.push("mcp.json");
-    notes.push("moved Claude-shaped mcp.json to .mcp.json and wrote Agent Plugins mcp.json");
-    return;
-  }
-  if (claudeRaw) {
-    await writeMissing(dest, "mcp.json", json(claudeMcpToAgent(claudeRaw)), wrote, skipped);
-    if (!await exists(destClaudePath)) {
-      await writeMissing(dest, ".mcp.json", json(normalizeClaudeMcp(claudeRaw)), wrote, skipped);
-    }
-    if (wrote.includes("mcp.json")) {
-      notes.push("wrote Agent Plugins mcp.json from Claude MCP");
-    }
-  }
-  if (agentRaw && !await exists(destClaudePath)) {
-    await writeMissing(dest, ".mcp.json", json(agentMcpToClaude(agentRaw)), wrote, skipped);
-    notes.push("wrote Claude .mcp.json from mcp.json");
-  }
-}
-async function findSkillFile(source) {
-  if (await isFile(source) && path4.basename(source) === "SKILL.md") {
-    return source;
-  }
-  const root = dirOf(source);
-  const direct = path4.join(root, "SKILL.md");
-  if (await isFile(direct)) {
-    return direct;
-  }
-  const skills = path4.join(root, "skills");
-  if (!await isDir(skills)) {
-    return void 0;
-  }
-  for (const entry of await readdir2(skills, { withFileTypes: true })) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-    const file = path4.join(skills, entry.name, "SKILL.md");
-    if (await isFile(file)) {
-      return file;
-    }
-  }
-  return void 0;
-}
-async function writeMissing(dest, rel, body, wrote, skipped) {
-  const file = path4.join(dest, rel);
-  if (await exists(file)) {
-    skipped.push(rel);
-    return;
-  }
-  await mkdir2(path4.dirname(file), { recursive: true });
-  await writeFile3(file, body);
-  wrote.push(rel);
-}
-function hookEvents(raw2) {
-  if (!raw2 || typeof raw2 !== "object") {
-    return {};
-  }
-  const record2 = raw2;
-  const hooks = record2.hooks;
-  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) {
-    return {};
-  }
-  return Object.fromEntries(
-    Object.entries(hooks).map(([key, value]) => [key, Array.isArray(value) ? value : []])
-  );
-}
-function isClaudeHookShape(raw2) {
-  return Object.keys(hookEvents(raw2)).some((key) => key[0] === key[0]?.toUpperCase());
-}
-function extractCommands(entry) {
-  if (!entry || typeof entry !== "object") {
-    return [];
-  }
-  const record2 = entry;
-  if (typeof record2.command === "string") {
-    return [record2.command];
-  }
-  const nested = record2.hooks;
-  if (!Array.isArray(nested)) {
-    return [];
-  }
-  return nested.flatMap((item) => extractCommands(item));
-}
-function toCursorCommand(command) {
-  return command.replaceAll('"${CLAUDE_PLUGIN_ROOT}"/', "./").replaceAll("${CLAUDE_PLUGIN_ROOT}/", "./").replaceAll('"${CLAUDE_PLUGIN_ROOT}"', ".").replaceAll("${CLAUDE_PLUGIN_ROOT}", ".");
-}
-function toClaudeCommand(command) {
-  if (command.startsWith("./")) {
-    return `"\${CLAUDE_PLUGIN_ROOT}"/${command.slice(2)}`;
-  }
-  return command;
-}
-function toClaudePath(value) {
-  if (value.startsWith("./")) {
-    return `\${CLAUDE_PLUGIN_ROOT}/${value.slice(2)}`;
-  }
-  return value;
-}
-function toAgentEntry(entry) {
-  const record2 = entry && typeof entry === "object" ? entry : {};
-  if (typeof record2.url === "string" && record2.url) {
-    const type = record2.type === "sse" ? "sse" : "streamable-http";
-    return { type, url: record2.url };
-  }
-  const args = Array.isArray(record2.args) ? record2.args.map((arg) => toCursorCommand(String(arg))) : [];
-  const env = agentEnv(record2.env);
-  return {
-    type: "stdio",
-    command: typeof record2.command === "string" ? record2.command : "node",
-    args,
-    cwd: "./",
-    ...env ? { env } : {}
-  };
-}
-function toCodexInline(raw2) {
-  const servers = serverMap(raw2);
-  return Object.fromEntries(
-    Object.entries(servers).map(([key, entry]) => {
-      const agent = toAgentEntry(entry);
-      if (agent.url) {
-        return [key, { url: agent.url, type: agent.type }];
-      }
-      return [
-        key,
-        {
-          command: agent.command,
-          args: agent.args,
-          cwd: "."
-        }
-      ];
-    })
-  );
-}
-function normalizeClaudeMcp(raw2) {
-  if (isAgentMcpShape(raw2)) {
-    return agentMcpToClaude(raw2);
-  }
-  const servers = serverMap(raw2);
-  return { mcpServers: servers };
-}
-function serverMap(raw2) {
-  if (!raw2 || typeof raw2 !== "object") {
-    return {};
-  }
-  const record2 = raw2;
-  const wrapped = record2.mcpServers;
-  if (wrapped && typeof wrapped === "object" && !Array.isArray(wrapped)) {
-    return wrapped;
-  }
-  return Object.fromEntries(Object.entries(record2).filter(([key]) => key !== "$schema"));
-}
-function isAgentMcpShape(raw2) {
-  return Boolean(raw2 && typeof raw2 === "object" && "$schema" in raw2);
-}
-function isClaudeMcpShape(raw2) {
-  if (!raw2 || typeof raw2 !== "object" || isAgentMcpShape(raw2)) {
-    return false;
-  }
-  return JSON.stringify(raw2).includes("CLAUDE_PLUGIN_ROOT");
-}
-function agentEnv(value) {
-  if (!isStringRecord(value)) {
-    return void 0;
-  }
-  const next = Object.fromEntries(
-    Object.entries(value).filter(([key, item]) => {
-      if (FORBIDDEN_AGENT_ENV.has(key)) {
-        return false;
-      }
-      return !item.includes("CLAUDE_PLUGIN_ROOT") && !item.includes("CLAUDE_PROJECT_DIR");
-    })
-  );
-  return Object.keys(next).length ? next : void 0;
-}
-function claudeEnv(value) {
-  return isStringRecord(value) && Object.keys(value).length ? value : void 0;
-}
-function camelCase(value) {
-  return value.charAt(0).toLowerCase() + value.slice(1);
-}
-function pascalCase(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-function stringField(raw2, key) {
-  if (!raw2 || typeof raw2 !== "object") {
-    return void 0;
-  }
-  const value = raw2[key];
-  return typeof value === "string" && value.trim() ? value.trim() : void 0;
-}
-function arrayField(raw2, key) {
-  if (!raw2 || typeof raw2 !== "object") {
-    return [];
-  }
-  const value = raw2[key];
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((item) => typeof item === "string");
-}
-function isStringRecord(value) {
-  return Boolean(
-    value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every((item) => typeof item === "string")
-  );
-}
-function json(value) {
-  return `${JSON.stringify(value, null, 2)}
-`;
-}
-function dirOf(source) {
-  return source.endsWith(".md") ? path4.dirname(source) : source;
-}
-async function firstClaudeHooks(files) {
-  for (const file of files) {
-    const parsed = await readJson(file);
-    if (parsed && isClaudeHookShape(parsed)) {
-      return parsed;
-    }
-  }
-  return void 0;
-}
-async function firstCursorHooks(files) {
-  for (const file of files) {
-    const parsed = await readJson(file);
-    if (parsed && !isClaudeHookShape(parsed) && Object.keys(hookEvents(parsed)).length) {
-      return parsed;
-    }
-  }
-  return void 0;
-}
-async function isClaudeNamedHooks(file) {
-  const parsed = await readJson(file);
-  return Boolean(parsed && isClaudeHookShape(parsed));
-}
-async function isClaudeNamedMcp(file) {
-  return isClaudeMcpShape(await readJson(file));
-}
-async function pluginInlineMcp(dir) {
-  const claude = await readJson(path4.join(dir, ".claude-plugin", "plugin.json"));
-  if (claude && "mcpServers" in claude) {
-    return { mcpServers: claude.mcpServers };
-  }
-  return void 0;
-}
-async function looksLikePlugin(dir) {
-  return await isFile(path4.join(dir, ".claude-plugin", "plugin.json")) || await isFile(path4.join(dir, "plugin.json")) || await isDir(path4.join(dir, "skills"));
-}
-async function readJson(file) {
-  try {
-    return JSON.parse(await readFile3(file, "utf8"));
-  } catch {
-    return void 0;
-  }
-}
-async function exists(target) {
-  try {
-    await stat2(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function isFile(target) {
-  try {
-    return (await stat2(target)).isFile();
-  } catch {
-    return false;
-  }
-}
-async function isDir(target) {
-  try {
-    return (await stat2(target)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 // src/catalog.ts
+init_frontmatter();
 import { existsSync as existsSync2 } from "node:fs";
-import { readdir as readdir3, readFile as readFile4, realpath, stat as stat3 } from "node:fs/promises";
-import path5 from "node:path";
+import { readdir as readdir6, readFile as readFile6, realpath, stat as stat4 } from "node:fs/promises";
+import path14 from "node:path";
 
 // src/types.ts
 var ARTIFACT_KINDS = ["skill", "rule", "agent", "command", "hook", "mcp"];
@@ -22513,14 +27233,14 @@ var Catalog = class {
     if (this.snapshot) {
       return this.snapshot;
     }
-    const marketplacePath = path5.join(this.root, path5.relative(REPO_ROOT, CLAUDE_MARKETPLACE));
+    const marketplacePath = path14.join(this.root, path14.relative(REPO_ROOT, CLAUDE_MARKETPLACE));
     const plugins = [];
     const artifacts = [];
-    if (await exists2(marketplacePath)) {
-      const marketplace = JSON.parse(await readFile4(marketplacePath, "utf8"));
+    if (await exists3(marketplacePath)) {
+      const marketplace = JSON.parse(await readFile6(marketplacePath, "utf8"));
       for (const entry of marketplace.plugins) {
         const source = pluginSource(entry);
-        const pluginRoot = path5.resolve(this.root, source);
+        const pluginRoot = path14.resolve(this.root, source);
         const plugin = {
           name: entry.name,
           description: entry.description ?? "",
@@ -22578,17 +27298,17 @@ async function scanPlugin(plugin) {
   return found;
 }
 async function scanSkills(plugin) {
-  const dir = path5.join(plugin.root, "skills");
-  if (!await exists2(dir)) {
+  const dir = path14.join(plugin.root, "skills");
+  if (!await exists3(dir)) {
     return [];
   }
   const records = [];
-  for (const entry of await readdir3(dir, { withFileTypes: true })) {
+  for (const entry of await readdir6(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) {
       continue;
     }
-    const file = path5.join(dir, entry.name, "SKILL.md");
-    if (!await exists2(file)) {
+    const file = path14.join(dir, entry.name, "SKILL.md");
+    if (!await exists3(file)) {
       continue;
     }
     records.push(await readMarkdownArtifact(plugin, "skill", entry.name, file));
@@ -22596,51 +27316,52 @@ async function scanSkills(plugin) {
   return records;
 }
 async function scanMarkdownKind(plugin, kind, directory, extensions) {
-  const dir = path5.join(plugin.root, directory);
-  if (!await exists2(dir)) {
+  const dir = path14.join(plugin.root, directory);
+  if (!await exists3(dir)) {
     return [];
   }
   const records = [];
-  for (const entry of await readdir3(dir, { withFileTypes: true })) {
+  for (const entry of await readdir6(dir, { withFileTypes: true })) {
     if (!entry.isFile()) {
       continue;
     }
-    const ext = path5.extname(entry.name);
+    const ext = path14.extname(entry.name);
     if (!extensions.includes(ext)) {
       continue;
     }
-    const name = path5.basename(entry.name, ext);
-    records.push(await readMarkdownArtifact(plugin, kind, name, path5.join(dir, entry.name)));
+    const name = path14.basename(entry.name, ext);
+    records.push(await readMarkdownArtifact(plugin, kind, name, path14.join(dir, entry.name)));
   }
   return records;
 }
 async function scanHooks(plugin) {
-  const dir = path5.join(plugin.root, "hooks");
-  if (!await exists2(dir)) {
+  const dir = path14.join(plugin.root, "hooks");
+  if (!await exists3(dir)) {
     return [];
   }
-  const records = [];
-  for (const fileName of ["hooks.json", "claude-hooks.json"]) {
-    const file = path5.join(dir, fileName);
-    if (!await exists2(file)) {
-      continue;
-    }
-    const raw2 = await readFile4(file, "utf8");
-    const parsed = JSON.parse(raw2);
-    const name = fileName === "claude-hooks.json" ? "claude-hooks" : "hooks";
-    records.push({
-      id: artifactId(plugin.name, "hook", name),
+  const file = path14.join(dir, "hooks.json");
+  if (!await exists3(file)) {
+    return [];
+  }
+  const raw2 = await readFile6(file, "utf8");
+  let description = `${plugin.name} hooks`;
+  try {
+    description = JSON.parse(raw2).description ?? description;
+  } catch {
+  }
+  return [
+    {
+      id: artifactId(plugin.name, "hook", "hooks"),
       plugin: plugin.name,
       kind: "hook",
-      name,
-      description: parsed.description ?? `${plugin.name} ${name}`,
+      name: "hooks",
+      description,
       path: file,
       version: plugin.version,
       body: raw2,
       raw: raw2
-    });
-  }
-  return records;
+    }
+  ];
 }
 async function scanMcp(plugin) {
   const specs = await parsePluginMcp(plugin.name, plugin.root);
@@ -22652,7 +27373,7 @@ async function scanMcp(plugin) {
       kind: "mcp",
       name: spec.key,
       description: spec.transport.type === "stdio" ? `${plugin.name} MCP ${spec.key} (${spec.transport.command})` : `${plugin.name} MCP ${spec.key} (${spec.transport.url})`,
-      path: path5.join(plugin.root, ".mcp.json"),
+      path: path14.join(plugin.root, ".mcp.json"),
       version: plugin.version,
       body: raw2,
       raw: raw2
@@ -22660,7 +27381,7 @@ async function scanMcp(plugin) {
   });
 }
 function selfPlugin() {
-  if (!existsSync2(path5.join(SERVER_DIR, ".claude-plugin", "plugin.json"))) {
+  if (!existsSync2(path14.join(SERVER_DIR, ".claude-plugin", "plugin.json"))) {
     return void 0;
   }
   return {
@@ -22672,7 +27393,7 @@ function selfPlugin() {
   };
 }
 async function readMarkdownArtifact(plugin, kind, fallbackName, file) {
-  const raw2 = await readFile4(file, "utf8");
+  const raw2 = await readFile6(file, "utf8");
   const { data, body } = parseFrontmatter(raw2);
   return {
     id: artifactId(plugin.name, kind, data.name ?? fallbackName),
@@ -22686,9 +27407,9 @@ async function readMarkdownArtifact(plugin, kind, fallbackName, file) {
     raw: raw2
   };
 }
-async function exists2(target) {
+async function exists3(target) {
   try {
-    await stat3(target);
+    await stat4(target);
     return true;
   } catch {
     return false;
@@ -22697,7 +27418,7 @@ async function exists2(target) {
 async function assertInsideRoot(file, root) {
   const resolved = await realpath(file);
   const resolvedRoot = await realpath(root);
-  if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path5.sep)) {
+  if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path14.sep)) {
     throw new Error("path escapes plugin root");
   }
   return resolved;
@@ -22708,8 +27429,8 @@ function indexOf(artifact) {
 }
 
 // src/http.ts
-import { readFile as readFile5, stat as stat4, writeFile as writeFile4 } from "node:fs/promises";
-import path6 from "node:path";
+import { readFile as readFile7, stat as stat5, writeFile as writeFile5 } from "node:fs/promises";
+import path15 from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 var PerRequestHTTPServerTransport = class {
@@ -24102,26 +28823,26 @@ var handleParsingNestedValues = (form, key, value) => {
 };
 
 // node_modules/hono/dist/utils/url.js
-var splitPath = (path8) => {
-  const paths = path8.split("/");
+var splitPath = (path17) => {
+  const paths = path17.split("/");
   if (paths[0] === "") {
     paths.shift();
   }
   return paths;
 };
 var splitRoutingPath = (routePath) => {
-  const { groups, path: path8 } = extractGroupsFromPath(routePath);
-  const paths = splitPath(path8);
+  const { groups, path: path17 } = extractGroupsFromPath(routePath);
+  const paths = splitPath(path17);
   return replaceGroupMarks(paths, groups);
 };
-var extractGroupsFromPath = (path8) => {
+var extractGroupsFromPath = (path17) => {
   const groups = [];
-  path8 = path8.replace(/\{[^}]+\}/g, (match2, index) => {
+  path17 = path17.replace(/\{[^}]+\}/g, (match2, index) => {
     const mark = `@${index}`;
     groups.push([mark, match2]);
     return mark;
   });
-  return { groups, path: path8 };
+  return { groups, path: path17 };
 };
 var replaceGroupMarks = (paths, groups) => {
   for (let i = groups.length - 1; i >= 0; i--) {
@@ -24178,8 +28899,8 @@ var getPath = (request) => {
       const queryIndex = url2.indexOf("?", i);
       const hashIndex = url2.indexOf("#", i);
       const end = queryIndex === -1 ? hashIndex === -1 ? void 0 : hashIndex : hashIndex === -1 ? queryIndex : Math.min(queryIndex, hashIndex);
-      const path8 = url2.slice(start, end);
-      return tryDecodeURI(path8.includes("%25") ? path8.replace(/%25/g, "%2525") : path8);
+      const path17 = url2.slice(start, end);
+      return tryDecodeURI(path17.includes("%25") ? path17.replace(/%25/g, "%2525") : path17);
     } else if (charCode === 63 || charCode === 35) {
       break;
     }
@@ -24196,11 +28917,11 @@ var mergePath = (base, sub, ...rest) => {
   }
   return `${base?.[0] === "/" ? "" : "/"}${base}${sub === "/" ? "" : `${base?.at(-1) === "/" ? "" : "/"}${sub?.[0] === "/" ? sub.slice(1) : sub}`}`;
 };
-var checkOptionalParameter = (path8) => {
-  if (path8.charCodeAt(path8.length - 1) !== 63 || !path8.includes(":")) {
+var checkOptionalParameter = (path17) => {
+  if (path17.charCodeAt(path17.length - 1) !== 63 || !path17.includes(":")) {
     return null;
   }
-  const segments = path8.split("/");
+  const segments = path17.split("/");
   const results = [];
   let basePath = "";
   segments.forEach((segment) => {
@@ -24338,9 +29059,9 @@ var HonoRequest = class {
    */
   path;
   bodyCache = {};
-  constructor(request, path8 = "/", matchResult = [[]]) {
+  constructor(request, path17 = "/", matchResult = [[]]) {
     this.raw = request;
-    this.path = path8;
+    this.path = path17;
     this.#matchResult = matchResult;
   }
   param(key) {
@@ -25107,8 +29828,8 @@ var Hono = class _Hono {
         return this;
       };
     });
-    this.on = (method, path8, ...handlers) => {
-      for (const p of [path8].flat()) {
+    this.on = (method, path17, ...handlers) => {
+      for (const p of [path17].flat()) {
         this.#path = p;
         for (const m of [method].flat()) {
           handlers.map((handler) => {
@@ -25165,8 +29886,8 @@ var Hono = class _Hono {
    * app.route("/api", app2) // GET /api/user
    * ```
    */
-  route(path8, app) {
-    const subApp = this.basePath(path8);
+  route(path17, app) {
+    const subApp = this.basePath(path17);
     app.routes.map((r) => {
       let handler;
       if (app.errorHandler === errorHandler) {
@@ -25192,9 +29913,9 @@ var Hono = class _Hono {
    * const api = new Hono().basePath('/api')
    * ```
    */
-  basePath(path8) {
+  basePath(path17) {
     const subApp = this.#clone();
-    subApp._basePath = mergePath(this._basePath, path8);
+    subApp._basePath = mergePath(this._basePath, path17);
     return subApp;
   }
   /**
@@ -25268,7 +29989,7 @@ var Hono = class _Hono {
    * })
    * ```
    */
-  mount(path8, applicationHandler, options) {
+  mount(path17, applicationHandler, options) {
     let replaceRequest;
     let optionHandler;
     if (options) {
@@ -25295,7 +30016,7 @@ var Hono = class _Hono {
       return [c.env, executionContext];
     };
     replaceRequest ||= (() => {
-      const mergedPath = mergePath(this._basePath, path8);
+      const mergedPath = mergePath(this._basePath, path17);
       const pathPrefixLength = mergedPath === "/" ? 0 : mergedPath.length;
       return (request) => {
         const url2 = new URL(request.url);
@@ -25310,19 +30031,19 @@ var Hono = class _Hono {
       }
       await next();
     };
-    this.#addRoute(METHOD_NAME_ALL, mergePath(path8, "*"), handler);
+    this.#addRoute(METHOD_NAME_ALL, mergePath(path17, "*"), handler);
     return this;
   }
-  #addRoute(method, path8, handler, baseRoutePath) {
+  #addRoute(method, path17, handler, baseRoutePath) {
     method = method.toUpperCase();
-    path8 = mergePath(this._basePath, path8);
+    path17 = mergePath(this._basePath, path17);
     const r = {
       basePath: baseRoutePath !== void 0 ? mergePath(this._basePath, baseRoutePath) : this._basePath,
-      path: path8,
+      path: path17,
       method,
       handler
     };
-    this.router.add(method, path8, [handler, r]);
+    this.router.add(method, path17, [handler, r]);
     this.routes.push(r);
   }
   #handleError(err, c) {
@@ -25335,10 +30056,10 @@ var Hono = class _Hono {
     if (method === "HEAD") {
       return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
     }
-    const path8 = this.getPath(request, { env });
-    const matchResult = this.router.match(method, path8);
+    const path17 = this.getPath(request, { env });
+    const matchResult = this.router.match(method, path17);
     const c = new Context(request, {
-      path: path8,
+      path: path17,
       matchResult,
       env,
       executionCtx,
@@ -25438,7 +30159,7 @@ var Hono = class _Hono {
 
 // node_modules/hono/dist/router/reg-exp-router/matcher.js
 var emptyParam = [];
-function match(method, path8) {
+function match(method, path17) {
   const matchers = this.buildAllMatchers();
   const match2 = ((method2, path22) => {
     const matcher = matchers[method2] || matchers[METHOD_NAME_ALL];
@@ -25454,7 +30175,7 @@ function match(method, path8) {
     return [matcher[1][index], match3];
   });
   this.match = match2;
-  return match2(method, path8);
+  return match2(method, path17);
 }
 
 // node_modules/hono/dist/router/reg-exp-router/node.js
@@ -25571,14 +30292,14 @@ var Trie = class {
   #index = 0;
   // dynamic path -> [handler index, param assoc]; static paths are not registered
   paths = /* @__PURE__ */ Object.create(null);
-  insert(path8, isStatic) {
+  insert(path17, isStatic) {
     if (isStatic) {
-      this.#root.insert(path8.split(""), 0, [], this.#context, true);
+      this.#root.insert(path17.split(""), 0, [], this.#context, true);
       return;
     }
     const paramAssoc = [];
     const groups = [];
-    let markedPath = path8;
+    let markedPath = path17;
     for (let i = 0; ; ) {
       let replaced = false;
       markedPath = markedPath.replace(/\{[^}]+\}/g, (m) => {
@@ -25603,7 +30324,7 @@ var Trie = class {
       }
     }
     this.#root.insert(tokens, this.#index, paramAssoc, this.#context, false);
-    this.paths[path8] = [this.#index++, paramAssoc];
+    this.paths[path17] = [this.#index++, paramAssoc];
   }
   buildRegExp() {
     let regexp = this.#root.buildRegExpStr();
@@ -25630,9 +30351,9 @@ var Trie = class {
 
 // node_modules/hono/dist/router/reg-exp-router/router.js
 var wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
-function buildWildcardRegExp(path8) {
-  return wildcardRegExpCache[path8] ??= new RegExp(
-    path8 === "*" ? "" : `^${path8.replace(
+function buildWildcardRegExp(path17) {
+  return wildcardRegExpCache[path17] ??= new RegExp(
+    path17 === "*" ? "" : `^${path17.replace(
       /\/\*$|([.\\+*[^\]$()])/g,
       (_, metaChar) => metaChar ? `\\${metaChar}` : "(?:|/.*)"
     )}$`
@@ -25641,12 +30362,12 @@ function buildWildcardRegExp(path8) {
 function clearWildcardRegExpCache() {
   wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
 }
-function findMiddleware(middleware, path8) {
+function findMiddleware(middleware, path17) {
   if (!middleware) {
     return void 0;
   }
   for (const k of Object.keys(middleware).sort((a, b) => b.length - a.length)) {
-    if (buildWildcardRegExp(k).test(path8)) {
+    if (buildWildcardRegExp(k).test(path17)) {
       return [...middleware[k]];
     }
   }
@@ -25662,14 +30383,14 @@ var RegExpRouter = class {
     this.#routes = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
     this.#tries = { [METHOD_NAME_ALL]: new Trie() };
   }
-  #insertPath(method, path8) {
+  #insertPath(method, path17) {
     try {
-      this.#tries[method].insert(path8, !/\*|\/:/.test(path8));
+      this.#tries[method].insert(path17, !/\*|\/:/.test(path17));
     } catch (e) {
-      throw e === PATH_ERROR ? new UnsupportedPathError(path8) : e;
+      throw e === PATH_ERROR ? new UnsupportedPathError(path17) : e;
     }
   }
-  add(method, path8, handler) {
+  add(method, path17, handler) {
     const middleware = this.#middleware;
     const routes = this.#routes;
     if (!middleware || !routes) {
@@ -25685,16 +30406,16 @@ var RegExpRouter = class {
         });
       });
     }
-    if (path8 === "/*") {
-      path8 = "*";
+    if (path17 === "/*") {
+      path17 = "*";
     }
-    const paramCount = (path8.match(/\/:/g) || []).length;
-    if (/\*$/.test(path8)) {
-      const re = buildWildcardRegExp(path8);
+    const paramCount = (path17.match(/\/:/g) || []).length;
+    if (/\*$/.test(path17)) {
+      const re = buildWildcardRegExp(path17);
       Object.keys(middleware).forEach((m) => {
-        if ((method === METHOD_NAME_ALL || method === m) && !middleware[m][path8]) {
-          this.#insertPath(m, path8);
-          middleware[m][path8] = findMiddleware(middleware[m], path8) || findMiddleware(middleware[METHOD_NAME_ALL], path8) || [];
+        if ((method === METHOD_NAME_ALL || method === m) && !middleware[m][path17]) {
+          this.#insertPath(m, path17);
+          middleware[m][path17] = findMiddleware(middleware[m], path17) || findMiddleware(middleware[METHOD_NAME_ALL], path17) || [];
         }
       });
       Object.keys(middleware).forEach((m) => {
@@ -25713,7 +30434,7 @@ var RegExpRouter = class {
       });
       return;
     }
-    const paths = checkOptionalParameter(path8) || [path8];
+    const paths = checkOptionalParameter(path17) || [path17];
     for (let i = 0, len = paths.length; i < len; i++) {
       const path22 = paths[i];
       Object.keys(routes).forEach((m) => {
@@ -25746,11 +30467,11 @@ var RegExpRouter = class {
     const staticMap = /* @__PURE__ */ Object.create(null);
     const handlerData = [];
     [middleware, routes].forEach((r) => {
-      for (const path8 in r) {
-        const handlers = r[path8];
-        const pathData = trie.paths[path8];
+      for (const path17 in r) {
+        const handlers = r[path17];
+        const pathData = trie.paths[path17];
         if (!pathData) {
-          staticMap[path8] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
+          staticMap[path17] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
           continue;
         }
         const paramAssoc = pathData[1];
@@ -25794,13 +30515,13 @@ var SmartRouter = class {
   constructor(init) {
     this.#routers = init.routers;
   }
-  add(method, path8, handler) {
+  add(method, path17, handler) {
     if (!this.#routes) {
       throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
     }
-    this.#routes.push([method, path8, handler]);
+    this.#routes.push([method, path17, handler]);
   }
-  match(method, path8) {
+  match(method, path17) {
     if (!this.#routes) {
       throw new Error("Fatal error");
     }
@@ -25815,7 +30536,7 @@ var SmartRouter = class {
         for (let i2 = 0, len2 = routes.length; i2 < len2; i2++) {
           router.add(...routes[i2]);
         }
-        res = router.match(method, path8);
+        res = router.match(method, path17);
       } catch (e) {
         if (e instanceof UnsupportedPathError) {
           continue;
@@ -25865,10 +30586,10 @@ var Node2 = class _Node2 {
     }
     this.#patterns = [];
   }
-  insert(method, path8, handler) {
+  insert(method, path17, handler) {
     this.#order = ++this.#order;
     let curNode = this;
-    const parts = splitRoutingPath(path8);
+    const parts = splitRoutingPath(path17);
     const possibleKeys = [];
     for (let i = 0, len = parts.length; i < len; i++) {
       const p = parts[i];
@@ -25917,12 +30638,12 @@ var Node2 = class _Node2 {
       }
     }
   }
-  search(method, path8) {
+  search(method, path17) {
     const handlerSets = [];
     this.#params = emptyParams;
     const curNode = this;
     let curNodes = [curNode];
-    const parts = splitPath(path8);
+    const parts = splitPath(path17);
     const curNodesQueue = [];
     const len = parts.length;
     let partOffsets = null;
@@ -25964,13 +30685,13 @@ var Node2 = class _Node2 {
           if (matcher instanceof RegExp) {
             if (partOffsets === null) {
               partOffsets = new Array(len);
-              let offset = path8[0] === "/" ? 1 : 0;
+              let offset = path17[0] === "/" ? 1 : 0;
               for (let p = 0; p < len; p++) {
                 partOffsets[p] = offset;
                 offset += parts[p].length + 1;
               }
             }
-            const restPathString = path8.substring(partOffsets[i]);
+            const restPathString = path17.substring(partOffsets[i]);
             const m = matcher.exec(restPathString);
             if (m) {
               params[name] = m[0];
@@ -26032,18 +30753,18 @@ var TrieRouter = class {
   constructor() {
     this.#node = new Node2();
   }
-  add(method, path8, handler) {
-    const results = checkOptionalParameter(path8);
+  add(method, path17, handler) {
+    const results = checkOptionalParameter(path17);
     if (results) {
       for (let i = 0, len = results.length; i < len; i++) {
         this.#node.insert(method, results[i], handler);
       }
       return;
     }
-    this.#node.insert(method, path8, handler);
+    this.#node.insert(method, path17, handler);
   }
-  match(method, path8) {
-    return this.#node.search(method, path8);
+  match(method, path17) {
+    return this.#node.search(method, path17);
   }
 };
 
@@ -26098,6 +30819,161 @@ function localhostOriginValidation() {
   return originValidation(localhostAllowedOrigins());
 }
 
+// src/env-api.ts
+var ENV_KINDS = ["skills", "plugins", "mcp", "hooks", "agents", "commands", "memory"];
+function isEnvKind(value) {
+  return ENV_KINDS.includes(value);
+}
+function countInventory(inventory) {
+  return {
+    skills: inventory.skills.length,
+    plugins: inventory.plugins.length,
+    mcp: inventory.mcpServers.length,
+    hooks: inventory.hooks.length,
+    agents: inventory.agents.length,
+    commands: inventory.commands.length,
+    memory: inventory.memory.length
+  };
+}
+function filterInventory(inventory, kind) {
+  return {
+    ...inventory,
+    skills: kind === "skills" ? inventory.skills : [],
+    plugins: kind === "plugins" ? inventory.plugins : [],
+    mcpServers: kind === "mcp" ? inventory.mcpServers : [],
+    hooks: kind === "hooks" ? inventory.hooks : [],
+    agents: kind === "agents" ? inventory.agents : [],
+    commands: kind === "commands" ? inventory.commands : [],
+    memory: kind === "memory" ? inventory.memory : []
+  };
+}
+var MAX_DESC_CHARS = 140;
+var DEFAULT_ROW_LIMIT = 50;
+function summarizeInventory(inventory, options = {}) {
+  const limit = options.limit ?? DEFAULT_ROW_LIMIT;
+  const all = rowsFor(inventory, options.kind);
+  const rows = all.slice(0, limit);
+  return {
+    projectRoot: inventory.projectRoot,
+    clients: inventory.clients,
+    counts: countInventory(inventory),
+    ...options.kind ? { kind: options.kind } : {},
+    rows,
+    shown: rows.length,
+    omitted: all.length - rows.length,
+    warnings: inventory.warnings.length
+  };
+}
+function rowsFor(inventory, kind) {
+  const rows = [];
+  if (!kind || kind === "skills") {
+    for (const skill of inventory.skills) {
+      rows.push({
+        kind: "skills",
+        id: skill.id,
+        client: skill.client,
+        scope: skill.scope,
+        name: skill.qualifiedName,
+        state: skill.visibility,
+        ...describe3(skill.description)
+      });
+    }
+  }
+  if (!kind || kind === "plugins") {
+    for (const plugin of inventory.plugins) {
+      rows.push({
+        kind: "plugins",
+        id: plugin.id,
+        client: plugin.client,
+        scope: plugin.scope,
+        name: plugin.qualifiedName,
+        state: `${plugin.enabled ? "enabled" : "disabled"}${plugin.installed ? "" : ", not installed"}`,
+        ...describe3(plugin.description)
+      });
+    }
+  }
+  if (!kind || kind === "mcp") {
+    for (const server of inventory.mcpServers) {
+      rows.push({
+        kind: "mcp",
+        id: server.id,
+        client: server.client,
+        scope: server.scope,
+        name: server.name,
+        state: `${server.transport}, ${server.enabled ? "enabled" : "disabled"}`,
+        ...describe3(server.command ?? server.url ?? "")
+      });
+    }
+  }
+  if (!kind || kind === "hooks") {
+    for (const hook of inventory.hooks) {
+      rows.push({
+        kind: "hooks",
+        id: hook.id,
+        client: hook.client,
+        scope: hook.scope,
+        name: hook.event,
+        state: hook.enabled ? "enabled" : "disabled",
+        ...describe3(hook.command)
+      });
+    }
+  }
+  if (!kind || kind === "agents") {
+    for (const agent of inventory.agents) {
+      rows.push({
+        kind: "agents",
+        id: agent.id,
+        client: agent.client,
+        scope: agent.scope,
+        name: agent.name,
+        ...describe3(agent.description)
+      });
+    }
+  }
+  if (!kind || kind === "commands") {
+    for (const command of inventory.commands) {
+      rows.push({
+        kind: "commands",
+        id: command.id,
+        client: command.client,
+        scope: command.scope,
+        name: command.name,
+        ...describe3(command.description)
+      });
+    }
+  }
+  if (!kind || kind === "memory") {
+    for (const memory of inventory.memory) {
+      rows.push({
+        kind: "memory",
+        id: memory.id,
+        client: memory.client,
+        scope: memory.scope,
+        name: memory.name,
+        state: `${memory.bytes} bytes, always loaded`
+      });
+    }
+  }
+  return rows;
+}
+function describe3(text) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return {};
+  }
+  return {
+    description: trimmed.length > MAX_DESC_CHARS ? `${trimmed.slice(0, MAX_DESC_CHARS)}\u2026` : trimmed
+  };
+}
+function actionTarget(opts) {
+  return {
+    projectRoot: process.cwd(),
+    ...opts.client ? { client: opts.client } : {},
+    ...opts.scope ? { scope: opts.scope } : {},
+    ...opts.dryRun !== void 0 ? { dryRun: opts.dryRun } : {}
+  };
+}
+
 // src/search.ts
 function searchArtifacts(artifacts, query) {
   const tokens = tokenize(query.query);
@@ -26147,6 +31023,11 @@ function tokenize(query) {
 
 // src/mcp.ts
 var KindSchema = _enum(ARTIFACT_KINDS);
+var EnvKindSchema = _enum(ENV_KINDS);
+var ClientSchema = _enum(CLIENTS);
+var ScopeSchema = _enum(["user", "project", "local"]);
+var VisibilitySchema = _enum(SKILL_VISIBILITIES);
+var MAX_REPORT_LINES = 25;
 function createYardServer(catalog, session) {
   const server = new McpServer({
     name: "yard",
@@ -26325,6 +31206,158 @@ function createYardServer(catalog, session) {
       return textResult({ plugins: snap.plugins.length, artifacts: snap.artifacts.length });
     }
   );
+  server.registerTool(
+    "env_inventory",
+    {
+      title: "List the installed agent environment",
+      description: "What Claude Code, Codex, and Cursor will actually load here: skills, plugins, MCP servers, hooks, subagents, commands, and memory files. Use it when the user asks what is installed, why something is or is not available, or before changing any client config. Returns counts for every kind plus at most `limit` rows, so pass `kind` to see one kind in full. Reads config files only.",
+      inputSchema: object({
+        client: ClientSchema.optional().describe("Restrict the scan to one client. Defaults to every installed client."),
+        kind: EnvKindSchema.optional().describe("Restrict the rows to one kind. Counts always cover every kind."),
+        limit: number2().int().min(1).max(200).optional().describe(`Rows to return. Defaults to ${DEFAULT_ROW_LIMIT}.`)
+      }),
+      annotations: { readOnlyHint: true, idempotentHint: true }
+    },
+    async ({ client, kind, limit }) => {
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
+      return textResult(
+        summarizeInventory(inventory, {
+          ...kind ? { kind } : {},
+          ...limit !== void 0 ? { limit } : {}
+        })
+      );
+    }
+  );
+  server.registerTool(
+    "env_context",
+    {
+      title: "Price the context window",
+      description: "Estimated tokens every turn spends on skill listings, MCP tool schemas, subagents, commands, and memory files, with the biggest offenders and the command that turns each one off. Use it when the user asks why context is tight or what their setup costs. Nothing is written. With probe true it starts the user\u2019s configured MCP servers to read their real tool schemas, which runs those commands \u2014 leave it off unless the user asked for exact MCP numbers.",
+      inputSchema: object({
+        probe: boolean2().optional().describe("Start each configured MCP server to measure it instead of estimating. Defaults to false.")
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    async ({ probe }) => {
+      const inventory = await scanEnvironment(process.cwd());
+      const report = await buildContextReport(inventory, { probe: probe === true });
+      const lines = report.lines.slice(0, MAX_REPORT_LINES);
+      return textResult({
+        projectRoot: report.projectRoot,
+        clients: report.clients,
+        total: report.total,
+        totalHuman: formatTokens(report.total),
+        byKind: report.byKind,
+        byClient: report.byClient,
+        probed: report.probed,
+        notes: report.notes,
+        lines,
+        omitted: report.lines.length - lines.length
+      });
+    }
+  );
+  server.registerTool(
+    "env_doctor",
+    {
+      title: "Diagnose the agent setup",
+      description: "Find what is quietly broken: hooks pointing at deleted scripts, skills the model can never see, duplicate skill names, plugins that are enabled but not installed, unparseable config. Use it when a skill, hook, or MCP server does not behave as the user expects. Nothing is written. With probe true it starts the user\u2019s configured MCP servers to find out which ones actually come up, which runs those commands \u2014 leave it off unless the user asked.",
+      inputSchema: object({
+        probe: boolean2().optional().describe("Start each configured MCP server to check it responds. Defaults to false.")
+      }),
+      annotations: { readOnlyHint: true }
+    },
+    async ({ probe }) => {
+      const inventory = await scanEnvironment(process.cwd());
+      const diagnoses = await diagnose(inventory, { probe: probe === true });
+      const shown = diagnoses.slice(0, MAX_REPORT_LINES);
+      return textResult({
+        counts: {
+          error: diagnoses.filter((item) => item.severity === "error").length,
+          warning: diagnoses.filter((item) => item.severity === "warning").length,
+          info: diagnoses.filter((item) => item.severity === "info").length
+        },
+        probed: probe === true,
+        diagnoses: shown,
+        omitted: diagnoses.length - shown.length
+      });
+    }
+  );
+  server.registerTool(
+    "env_set_skill",
+    {
+      title: "Set a skill visibility or enablement",
+      description: "Rewrite the user\u2019s real client config to change how a skill is exposed. `visibility` is Claude Code\u2019s setting: on, name-only (the model sees the name but not the description), user-invocable-only (only a slash command reaches it), or off. `enabled` instead moves the skill directory in or out of the client\u2019s skills folder, which is all Codex offers. Pass dryRun to see the file that would change without touching it.",
+      inputSchema: object({
+        skill: string2().describe("Skill name, or plugin:name for a plugin skill"),
+        visibility: VisibilitySchema.optional(),
+        enabled: boolean2().optional().describe("Move the skill directory instead of setting a visibility"),
+        client: ClientSchema.optional().describe("Required only when the name exists in more than one client"),
+        scope: ScopeSchema.optional().describe("Which settings file to write. Defaults to user."),
+        dryRun: boolean2().optional()
+      })
+    },
+    async ({ skill, visibility, enabled, client, scope, dryRun }) => {
+      const target = actionTarget({
+        ...client ? { client } : {},
+        ...scope ? { scope } : {},
+        ...dryRun !== void 0 ? { dryRun } : {}
+      });
+      if (visibility !== void 0 && enabled !== void 0) {
+        throw new Error("pass visibility or enabled, not both");
+      }
+      if (visibility !== void 0) {
+        return textResult(await setSkillVisibility2({ ...target, skill, visibility }));
+      }
+      if (enabled !== void 0) {
+        return textResult(await setSkillEnabled({ ...target, skill, enabled }));
+      }
+      throw new Error("visibility or enabled is required");
+    }
+  );
+  server.registerTool(
+    "env_set_plugin",
+    {
+      title: "Enable or disable an installed plugin",
+      description: "Rewrite the user\u2019s real Claude Code settings to turn an installed plugin on or off, which also turns off the skills, hooks, and MCP servers it brings. Pass dryRun to see the file that would change without touching it.",
+      inputSchema: object({
+        plugin: string2().describe("Plugin name, or name@marketplace"),
+        enabled: boolean2(),
+        client: ClientSchema.optional().describe("Required only when the name exists in more than one client"),
+        scope: ScopeSchema.optional().describe("Which settings file to write. Defaults to user."),
+        dryRun: boolean2().optional()
+      })
+    },
+    async ({ plugin, enabled, client, scope, dryRun }) => {
+      const target = actionTarget({
+        ...client ? { client } : {},
+        ...scope ? { scope } : {},
+        ...dryRun !== void 0 ? { dryRun } : {}
+      });
+      return textResult(await setPluginEnabled2({ ...target, plugin, enabled }));
+    }
+  );
+  server.registerTool(
+    "env_set_mcp",
+    {
+      title: "Enable or disable an MCP server",
+      description: "Rewrite the user\u2019s real client config so a configured MCP server is loaded or not. This is the biggest single lever on context cost \u2014 an MCP server pays for every tool schema on every turn, whether or not it is used. Pass dryRun to see the file that would change without touching it.",
+      inputSchema: object({
+        server: string2().describe("Server name as it appears in the client config"),
+        enabled: boolean2(),
+        client: ClientSchema.optional().describe("Required only when the name exists in more than one client"),
+        scope: ScopeSchema.optional().describe("Which config file to write. Defaults to user."),
+        dryRun: boolean2().optional()
+      })
+    },
+    async ({ server: name, enabled, client, scope, dryRun }) => {
+      const target = actionTarget({
+        ...client ? { client } : {},
+        ...scope ? { scope } : {},
+        ...dryRun !== void 0 ? { dryRun } : {}
+      });
+      return textResult(await setMcpEnabled2({ ...target, server: name, enabled }));
+    }
+  );
   server.registerResource(
     "session",
     "yard://session",
@@ -26440,7 +31473,7 @@ function createYardApp(catalog, session) {
     const artifact = await catalog.artifact(id);
     const plugin = await catalog.plugin(artifact.plugin);
     await assertInsideRoot(artifact.path, plugin.root);
-    await writeFile4(artifact.path, body.raw);
+    await writeFile5(artifact.path, body.raw);
     catalog.invalidate();
     const next = await catalog.artifact(id);
     return c.json({ artifact: next });
@@ -26525,6 +31558,74 @@ function createYardApp(catalog, session) {
     catalog.invalidate();
     return c.json({ ok: true, ...report }, 201);
   });
+  app.get(
+    "/api/env/inventory",
+    envRoute(async (c) => {
+      const client = clientParam(c.req.query("client"));
+      const kind = kindParam(c.req.query("kind"));
+      const inventory = await scanEnvironment(process.cwd(), client ? { clients: [client] } : {});
+      return kind ? filterInventory(inventory, kind) : inventory;
+    })
+  );
+  app.get(
+    "/api/env/context",
+    envRoute(async (c) => {
+      const probe = probeParam(c.req.query("probe"));
+      const inventory = await scanEnvironment(process.cwd());
+      return buildContextReport(inventory, { probe });
+    })
+  );
+  app.get(
+    "/api/env/doctor",
+    envRoute(async (c) => {
+      const probe = probeParam(c.req.query("probe"));
+      const inventory = await scanEnvironment(process.cwd());
+      return { diagnoses: await diagnose(inventory, { probe }) };
+    })
+  );
+  app.post(
+    "/api/env/skill",
+    envRoute(async (c) => {
+      const body = await jsonBody(c);
+      const skill = requiredString(body.skill, "skill");
+      const target = targetFrom(body);
+      const { visibility, enabled } = body;
+      if (visibility !== void 0 && enabled !== void 0) {
+        return badRequest("pass visibility or enabled, not both");
+      }
+      if (visibility !== void 0) {
+        if (typeof visibility !== "string" || !isVisibility(visibility)) {
+          return badRequest(`visibility must be one of ${SKILL_VISIBILITIES.join(", ")}`);
+        }
+        return runAction(() => setSkillVisibility2({ ...target, skill, visibility }));
+      }
+      if (enabled !== void 0) {
+        if (typeof enabled !== "boolean") {
+          return badRequest("enabled must be a boolean");
+        }
+        return runAction(() => setSkillEnabled({ ...target, skill, enabled }));
+      }
+      return badRequest("visibility or enabled is required");
+    })
+  );
+  app.post(
+    "/api/env/plugin",
+    envRoute(async (c) => {
+      const body = await jsonBody(c);
+      const plugin = requiredString(body.plugin, "plugin");
+      const enabled = requiredBoolean(body.enabled, "enabled");
+      return runAction(() => setPluginEnabled2({ ...targetFrom(body), plugin, enabled }));
+    })
+  );
+  app.post(
+    "/api/env/mcp",
+    envRoute(async (c) => {
+      const body = await jsonBody(c);
+      const server = requiredString(body.server, "server");
+      const enabled = requiredBoolean(body.enabled, "enabled");
+      return runAction(() => setMcpEnabled2({ ...targetFrom(body), server, enabled }));
+    })
+  );
   app.post("/api/catalog/reload", async (c) => {
     catalog.invalidate();
     const snap = await catalog.load();
@@ -26536,7 +31637,7 @@ function createYardApp(catalog, session) {
     if (!file) {
       return c.json({ error: "not found" }, 404);
     }
-    const data = await readFile5(file);
+    const data = await readFile7(file);
     return c.body(data, 200, { "Content-Type": mimeFor(file) });
   });
   app.onError((error2, c) => c.json({ error: error2.message }, 400));
@@ -26545,39 +31646,141 @@ function createYardApp(catalog, session) {
 function isKind(value) {
   return ARTIFACT_KINDS.includes(value);
 }
+var BadRequest = class extends Error {
+};
+function badRequest(message) {
+  throw new BadRequest(message);
+}
+function envRoute(run) {
+  return async (c) => {
+    try {
+      return c.json(await run(c));
+    } catch (error2) {
+      const message = error2 instanceof Error ? error2.message : String(error2);
+      return c.json({ error: message }, error2 instanceof BadRequest ? 400 : 500);
+    }
+  };
+}
+async function runAction(run) {
+  try {
+    return await run();
+  } catch (error2) {
+    if (typeof error2?.code === "string") {
+      throw error2;
+    }
+    return badRequest(error2 instanceof Error ? error2.message : String(error2));
+  }
+}
+async function jsonBody(c) {
+  let raw2;
+  try {
+    raw2 = await c.req.json();
+  } catch {
+    return badRequest("body must be json");
+  }
+  if (!raw2 || typeof raw2 !== "object" || Array.isArray(raw2)) {
+    return badRequest("body must be a json object");
+  }
+  return raw2;
+}
+function requiredString(value, field) {
+  if (typeof value !== "string" || !value.trim()) {
+    return badRequest(`${field} is required`);
+  }
+  return value;
+}
+function requiredBoolean(value, field) {
+  if (typeof value !== "boolean") {
+    return badRequest(`${field} must be a boolean`);
+  }
+  return value;
+}
+function targetFrom(body) {
+  const { client, scope, dryRun } = body;
+  if (client !== void 0 && (typeof client !== "string" || !isClient(client))) {
+    return badRequest(`client must be one of ${CLIENTS.join(", ")}`);
+  }
+  if (scope !== void 0 && (typeof scope !== "string" || !isActionScope(scope))) {
+    return badRequest("scope must be one of user, project, local");
+  }
+  if (dryRun !== void 0 && typeof dryRun !== "boolean") {
+    return badRequest("dryRun must be a boolean");
+  }
+  return actionTarget({
+    ...client !== void 0 ? { client } : {},
+    ...scope !== void 0 ? { scope } : {},
+    ...dryRun !== void 0 ? { dryRun } : {}
+  });
+}
+function clientParam(value) {
+  if (!value) {
+    return void 0;
+  }
+  if (!isClient(value)) {
+    return badRequest(`client must be one of ${CLIENTS.join(", ")}`);
+  }
+  return value;
+}
+function kindParam(value) {
+  if (!value) {
+    return void 0;
+  }
+  if (!isEnvKind(value)) {
+    return badRequest(`kind must be one of ${ENV_KINDS.join(", ")}`);
+  }
+  return value;
+}
+function probeParam(value) {
+  if (value === void 0 || value === "" || value === "0" || value === "false") {
+    return false;
+  }
+  if (value === "1" || value === "true") {
+    return true;
+  }
+  return badRequest("probe must be 1 or 0");
+}
+function isClient(value) {
+  return CLIENTS.includes(value);
+}
+function isActionScope(value) {
+  return value === "user" || value === "project" || value === "local";
+}
+function isVisibility(value) {
+  return SKILL_VISIBILITIES.includes(value);
+}
 async function readIds(c) {
   const body = await c.req.json();
   return body.ids?.length ? body.ids : void 0;
 }
 async function resolvePublicFile(urlPath) {
   const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
-  const candidate = path6.resolve(PUBLIC_DIR, rel);
-  const root = path6.resolve(PUBLIC_DIR);
-  if (candidate !== root && !candidate.startsWith(root + path6.sep)) {
+  const candidate = path15.resolve(PUBLIC_DIR, rel);
+  const root = path15.resolve(PUBLIC_DIR);
+  if (candidate !== root && !candidate.startsWith(root + path15.sep)) {
     return void 0;
   }
-  if (await isFile2(candidate)) {
+  if (await isFile3(candidate)) {
     return candidate;
   }
-  if (!path6.extname(rel) && await isFile2(path6.join(PUBLIC_DIR, "index.html"))) {
-    return path6.join(PUBLIC_DIR, "index.html");
+  if (!path15.extname(rel) && await isFile3(path15.join(PUBLIC_DIR, "index.html"))) {
+    return path15.join(PUBLIC_DIR, "index.html");
   }
   return void 0;
 }
-async function isFile2(target) {
+async function isFile3(target) {
   try {
-    return (await stat4(target)).isFile();
+    return (await stat5(target)).isFile();
   } catch {
     return false;
   }
 }
 function mimeFor(file) {
-  return MIME[path6.extname(file)] ?? "application/octet-stream";
+  return MIME[path15.extname(file)] ?? "application/octet-stream";
 }
 
 // src/session.ts
-import { mkdir as mkdir3, readFile as readFile6, writeFile as writeFile5 } from "node:fs/promises";
-import path7 from "node:path";
+import { mkdir as mkdir6, readFile as readFile8, writeFile as writeFile6 } from "node:fs/promises";
+import path16 from "node:path";
 var Session = class {
   constructor(catalog, file = SESSION_FILE) {
     this.catalog = catalog;
@@ -26585,7 +31788,7 @@ var Session = class {
   }
   async read() {
     try {
-      const raw2 = JSON.parse(await readFile6(this.file, "utf8"));
+      const raw2 = JSON.parse(await readFile8(this.file, "utf8"));
       return {
         ...defaultSession(),
         ...raw2,
@@ -26716,8 +31919,8 @@ var Session = class {
     }
   }
   async write(state) {
-    await mkdir3(path7.dirname(this.file), { recursive: true });
-    await writeFile5(this.file, `${JSON.stringify(state, null, 2)}
+    await mkdir6(path16.dirname(this.file), { recursive: true });
+    await writeFile6(this.file, `${JSON.stringify(state, null, 2)}
 `);
   }
 };
@@ -26725,42 +31928,16 @@ function unique(values) {
   return [...new Set(values)].sort();
 }
 
-// src/cli.ts
+// src/cli/serve.ts
 var DEFAULT_PORT = 4372;
-async function main() {
-  if (process.argv.includes("--emit-mcp")) {
-    await writeMcpFiles(YARD_PLUGIN_DIR);
-    console.error(`wrote ${YARD_PLUGIN_DIR}/.mcp.json`);
-    console.error(`wrote ${YARD_PLUGIN_DIR}/mcp.json`);
-    return;
-  }
-  const adaptSource = flagValue("adapt");
-  if (adaptSource !== void 0) {
-    if (!adaptSource) {
-      throw new Error("usage: yard --adapt <path> [--name=] [--dest=] [--register|--no-register]");
-    }
-    const register2 = process.argv.includes("--register") ? true : process.argv.includes("--no-register") ? false : void 0;
-    const name = flagValue("name");
-    const dest = flagValue("dest");
-    const report = await adaptPlugin({
-      source: adaptSource,
-      ...name ? { name } : {},
-      ...dest ? { dest } : {},
-      ...register2 !== void 0 ? { register: register2 } : {}
-    });
-    console.log(JSON.stringify(report, null, 2));
-    return;
-  }
-  const stdio = process.argv.includes("--stdio");
-  const portFlag = process.argv.find((arg) => arg.startsWith("--port="));
-  const port = portFlag ? Number(portFlag.slice("--port=".length)) : DEFAULT_PORT;
+async function runServe(options = {}) {
   const catalog = new Catalog();
   const session = new Session(catalog);
   await catalog.load();
-  if (stdio) {
+  if (options.stdio) {
     console.error("yard listening on stdio");
     serveStdio(() => createYardServer(catalog, session));
-    return;
+    return 0;
   }
   const { app, close } = createYardApp(catalog, session);
   if (existsSync3(PLUGINS_DIR)) {
@@ -26769,7 +31946,7 @@ async function main() {
   if (existsSync3(REPO_ROOT)) {
     watch(REPO_ROOT, { recursive: false }, () => catalog.invalidate());
   }
-  serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
+  serve({ fetch: app.fetch, hostname: "127.0.0.1", port: options.port ?? DEFAULT_PORT }, (info) => {
     console.error(`yard  http://127.0.0.1:${info.port}`);
     console.error(`mcp   http://127.0.0.1:${info.port}/mcp`);
   });
@@ -26779,6 +31956,136 @@ async function main() {
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
+  return 0;
+}
+async function runServeCommand(args) {
+  rejectUnknownFlags(args, [...GLOBAL_FLAGS, "port", "stdio"]);
+  const port = flagNumber(args, "port");
+  return runServe({
+    stdio: args.flags.get("stdio") !== void 0,
+    ...port !== void 0 ? { port } : {}
+  });
+}
+
+// src/cli/skill.ts
+var USAGE = `yard skill <name> <${SKILL_VISIBILITIES.join("|")}|enable|disable>`;
+async function runSkill(args) {
+  rejectUnknownFlags(args, MUTATION_FLAGS);
+  const options = mutationOptions(args);
+  const [first, second, extra] = args.positionals;
+  if (extra !== void 0) {
+    throw new CliError(`unexpected argument "${extra}" \u2014 usage: ${USAGE}`);
+  }
+  if (!first || !second) {
+    throw new CliError(`usage: ${USAGE}`);
+  }
+  const skill = isAction(first) ? second : first;
+  const verb = isAction(first) ? first : second;
+  if (isAction(verb)) {
+    const result2 = await setSkillEnabled({ ...actionInput(options), skill, enabled: verb === "enable" });
+    return reportAction(result2, options);
+  }
+  if (!isVisibility2(verb)) {
+    throw new CliError(`unknown visibility "${verb}" \u2014 expected one of ${SKILL_VISIBILITIES.join(", ")}, enable, disable`);
+  }
+  const result = await setSkillVisibility2({ ...actionInput(options), skill, visibility: verb });
+  return reportAction(result, options);
+}
+function isVisibility2(value) {
+  return SKILL_VISIBILITIES.includes(value);
+}
+
+// src/cli/usage.ts
+var USAGE2 = `yard \u2014 one control plane for claude code, codex, and cursor
+
+usage: yard <command> [options]
+
+  scan                          what every client will load: counts, then the inventory
+    --client=claude|codex|cursor
+    --kind=skill|plugin|mcp|hook|agent|command|memory
+  context [--probe]             what your setup costs in context, per turn, and what to turn off
+  doctor [--probe]              what is quietly broken. exits 1 when anything is an error
+  skill <name> <visibility>     visibility is on, name-only, user-invocable-only, or off
+  skill <name> enable|disable   move a personal skill in or out of the skills directory
+  plugin enable|disable <name>
+  mcp enable|disable <name>
+  serve [--port=4372]           the http ui and the mcp endpoint
+  adapt <path>                  fill in codex and cursor files for a claude-only plugin
+    --name=  --dest=  --register|--no-register
+  new <name> <description>      scaffold a plugin into ./plugins
+
+options everywhere:
+  --json                        machine output, no colour
+  --project=<path>              project to scan, defaults to the working directory
+
+mutating commands also take:
+  --dry-run                     print what would change, write nothing
+  --client=<client>             which client to write to, when a name is ambiguous
+  --scope=user|project|local    which settings file to write, defaults to user
+
+legacy flags, unchanged:
+  --stdio                       serve mcp over stdio
+  --port=<port>                 serve the http ui on a port
+  --emit-mcp                    rewrite the yard plugin's mcp files
+  --adapt <path>                same as: yard adapt <path>
+`;
+function printUsage(stream = process.stdout) {
+  stream.write(USAGE2);
+}
+
+// src/cli.ts
+var COMMANDS = {
+  scan: runScan,
+  context: runContext,
+  doctor: runDoctor,
+  skill: runSkill,
+  plugin: runPlugin,
+  mcp: runMcp,
+  serve: runServeCommand,
+  adapt: runAdaptCommand,
+  new: runNew
+};
+async function main() {
+  const argv = process.argv.slice(2);
+  if (argv.includes("--help") || argv.includes("-h") || argv[0] === "help") {
+    printUsage();
+    return 0;
+  }
+  if (argv.includes("--emit-mcp")) {
+    return runEmitMcp();
+  }
+  const adaptSource = flagValue("adapt");
+  if (adaptSource !== void 0) {
+    const register2 = argv.includes("--register") ? true : argv.includes("--no-register") ? false : void 0;
+    const name = flagValue("name");
+    const dest = flagValue("dest");
+    return runAdapt({
+      source: adaptSource,
+      ...name ? { name } : {},
+      ...dest ? { dest } : {},
+      ...register2 !== void 0 ? { register: register2 } : {}
+    });
+  }
+  const first = argv[0];
+  if (first === void 0) {
+    printUsage();
+    return 0;
+  }
+  if (first.startsWith("-")) {
+    const portFlag = argv.find((arg) => arg.startsWith("--port="));
+    return runServe({
+      stdio: argv.includes("--stdio"),
+      ...portFlag ? { port: Number(portFlag.slice("--port=".length)) } : {}
+    });
+  }
+  const command = COMMANDS[first];
+  if (!command) {
+    process.stderr.write(`yard: unknown command "${first}"
+`);
+    printUsage(process.stderr);
+    return 1;
+  }
+  return command(parseArgs(argv));
 }
 function flagValue(name) {
   const prefix = `--${name}=`;
@@ -26796,4 +32103,13 @@ function flagValue(name) {
   }
   return next;
 }
-void main();
+main().then(
+  (code) => {
+    process.exitCode = code;
+  },
+  (error2) => {
+    process.stderr.write(`yard: ${error2 instanceof Error ? error2.message : String(error2)}
+`);
+    process.exitCode = 1;
+  }
+);

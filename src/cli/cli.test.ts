@@ -84,8 +84,9 @@ test('an unknown verb prints usage to stderr and exits 1', async () => {
 });
 
 test('scan --json is parseable and lists what the client loads', async () => {
-  await withFixture(async (fixture, exec) => {
-    const result = await exec(['scan', '--json', `--project=${fixture.project}`]);
+  await withFixture(async (_fixture, exec) => {
+    // No --project: this is the working-directory default.
+    const result = await exec(['scan', '--json']);
     assert.equal(result.code, 0);
     const payload = JSON.parse(result.stdout) as {
       clients: string[];

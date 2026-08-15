@@ -6,9 +6,9 @@ Three clients, three config formats, three sets of directories. Yard reads all o
 what they cost you in context, and lets you turn things off from one place.
 
 ```bash
-npx yard context     # what your setup costs per turn, and what to switch off
-npx yard doctor      # what is quietly broken
-npx yard scan        # everything the three clients will actually load
+yard context     # what your setup costs per turn, and what to switch off
+yard doctor      # what is quietly broken
+yard scan        # everything the three clients will actually load
 ```
 
 ## Why
@@ -45,10 +45,12 @@ $ yard context
 ## Install
 
 ```bash
-npm install -g @yannelli/yard
+git clone https://github.com/yannelli/skills && cd skills
+npm install && npm run build
+npm link            # puts `yard` on your PATH
 ```
 
-Or run the whole marketplace as a plugin so the agent can drive it:
+Or install the marketplace so the agent can drive it through MCP:
 
 ```text
 # Claude Code
