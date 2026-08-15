@@ -4893,15 +4893,21 @@ function resolveLaunch(entry, projectRoot) {
   });
   const expand = (value) => expandVariables(value, vars);
   const command = expand(entry.command ?? "");
-  const resolvedCommand = resolveIfRelativePath(command, entry.pluginRoot);
+  const resolvedCommand = resolveCommandPath(command, entry.pluginRoot);
   const args = (entry.args ?? []).map(expand);
   const env = entry.env ? mapValues(entry.env, expand) : void 0;
   const cwd = entry.cwd !== void 0 ? expand(entry.cwd) : entry.pluginRoot;
-  const resolvedCwd = cwd !== void 0 ? resolveIfRelativePath(cwd, entry.pluginRoot) : void 0;
+  const resolvedCwd = cwd !== void 0 ? resolveCwdPath(cwd, entry.pluginRoot) : void 0;
   return { command: resolvedCommand, args, cwd: resolvedCwd, env };
 }
-function resolveIfRelativePath(value, base) {
+function resolveCommandPath(value, base) {
   if (base === void 0 || value === "" || path12.isAbsolute(value) || !/[/\\]/.test(value)) {
+    return value;
+  }
+  return path12.resolve(base, value);
+}
+function resolveCwdPath(value, base) {
+  if (base === void 0 || value === "" || path12.isAbsolute(value)) {
     return value;
   }
   return path12.resolve(base, value);
