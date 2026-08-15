@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Catalog } from './catalog.js';
+import { defaultEmbeddingsModel } from './embed.js';
 import { SESSION_FILE } from './paths.js';
 import { defaultSession, type SessionState, type SessionView } from './types.js';
 
@@ -13,17 +14,20 @@ export class Session {
   async read(): Promise<SessionState> {
     try {
       const raw = JSON.parse(await readFile(this.file, 'utf8')) as Partial<SessionState>;
+      const defaults = defaultSession(defaultEmbeddingsModel());
       return {
-        ...defaultSession(),
+        ...defaults,
         ...raw,
         pinned: unique(raw.pinned ?? []),
         hydrated: unique(raw.hydrated ?? []),
         hooksActive: unique(raw.hooksActive ?? []),
         mcpLive: unique(raw.mcpLive ?? []),
-        disabledPlugins: unique(raw.disabledPlugins ?? [])
+        disabledPlugins: unique(raw.disabledPlugins ?? []),
+        embeddingsEnabled: Boolean(raw.embeddingsEnabled),
+        embeddingsModel: raw.embeddingsModel?.trim() || defaults.embeddingsModel
       };
     } catch {
-      return defaultSession();
+      return defaultSession(defaultEmbeddingsModel());
     }
   }
 
@@ -106,6 +110,16 @@ export class Session {
 
   async setMcpLive(ids: string[], active: boolean): Promise<SessionView> {
     return this.setLiveField('mcpLive', ids, active);
+  }
+
+  async setEmbeddings(input: { enabled: boolean; model?: string }): Promise<SessionView> {
+    const state = await this.read();
+    state.embeddingsEnabled = input.enabled;
+    if (input.model?.trim()) {
+      state.embeddingsModel = input.model.trim();
+    }
+    await this.write(state);
+    return this.view();
   }
 
   private async availableIds(state: SessionState): Promise<string[]> {

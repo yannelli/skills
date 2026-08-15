@@ -18,9 +18,10 @@ Yard session IDs are not client hook stores or client MCP stores.
 ## Tools
 
 1. `catalog_search` with a short query. Filter `kinds` when you know the type (`skill`, `rule`, `agent`, `command`, `hook`, `mcp`).
-2. `session_hydrate` with the chosen ids. Read the returned bodies.
-3. `session_dehydrate` when the work is done.
-4. `catalog_reload` after files change on disk.
+2. Optional: `session_set_embeddings` with `enabled: true` when `OPENROUTER_API_KEY` is set. Default model is `voyageai/voyage-4-lite`. Search then uses cached OpenRouter vectors.
+3. `session_hydrate` with the chosen ids. Read the returned bodies.
+4. `session_dehydrate` when the work is done.
+5. `catalog_reload` after files change on disk.
 
 ## Roots
 

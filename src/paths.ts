@@ -55,6 +55,7 @@ export const TEMPLATE_DIR = path.join(REPO_ROOT, 'templates', 'plugin');
 export const PUBLIC_DIR = resolvePublicDir(REPO_ROOT);
 export const YARD_DIR = path.join(REPO_ROOT, '.yard');
 export const SESSION_FILE = path.join(YARD_DIR, 'state.json');
+export const EMBEDDINGS_DIR = path.join(YARD_DIR, 'embeddings');
 export const YARD_PLUGIN_DIR = path.join(REPO_ROOT, 'plugins', 'yard');
 
 export const MARKETPLACE_FILES = [CLAUDE_MARKETPLACE, CODEX_MARKETPLACE, CURSOR_MARKETPLACE] as const;

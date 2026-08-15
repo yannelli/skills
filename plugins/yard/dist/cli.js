@@ -946,10 +946,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path7) {
-  if (!path7)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path7.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -1358,11 +1358,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path7, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path7);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -1509,16 +1509,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path7 = []) => {
+  const processError = (error3, path8 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -9890,9 +9890,9 @@ var rev2026Codec = {
     });
     const parsed = buildSchemas2026().RequestMetaEnvelopeSchema.safeParse(meta2);
     if (!parsed.success) for (const issue2 of parsed.error.issues) {
-      const path7 = issue2.path.map(String);
-      const key = path7.length > 0 ? path7.join(".") : "_meta";
-      if (path7.length === 1 && issues.some((existing) => existing.key === key && existing.problem === "missing")) continue;
+      const path8 = issue2.path.map(String);
+      const key = path8.length > 0 ? path8.join(".") : "_meta";
+      if (path8.length === 1 && issues.some((existing) => existing.key === key && existing.problem === "missing")) continue;
       issues.push({
         key,
         problem: issue2.message
@@ -10215,29 +10215,29 @@ var PERMITTED_X_MCP_HEADER_TYPES = /* @__PURE__ */ new Set([
 function scanXMcpHeaderDeclarations(inputSchema) {
   const declarations = [];
   const seenLower = /* @__PURE__ */ new Map();
-  const visit = (node, path7, reachable) => {
+  const visit = (node, path8, reachable) => {
     if (node === null || typeof node !== "object") return void 0;
     const schema = node;
     if (X_MCP_HEADER_KEY in schema) {
-      if (!reachable || path7.length === 0) return `${pathName(path7)}: x-mcp-header is only permitted on properties statically reachable via a chain of 'properties' keys (not under items, additionalProperties, oneOf/anyOf/allOf/not, if/then/else, or $ref)`;
+      if (!reachable || path8.length === 0) return `${pathName(path8)}: x-mcp-header is only permitted on properties statically reachable via a chain of 'properties' keys (not under items, additionalProperties, oneOf/anyOf/allOf/not, if/then/else, or $ref)`;
       const raw2 = schema[X_MCP_HEADER_KEY];
-      if (typeof raw2 !== "string" || raw2.length === 0) return `${pathName(path7)}: x-mcp-header MUST be a non-empty string`;
-      if (!RFC9110_TOKEN.test(raw2)) return `${pathName(path7)}: x-mcp-header '${raw2}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
+      if (typeof raw2 !== "string" || raw2.length === 0) return `${pathName(path8)}: x-mcp-header MUST be a non-empty string`;
+      if (!RFC9110_TOKEN.test(raw2)) return `${pathName(path8)}: x-mcp-header '${raw2}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
       const type = typeof schema.type === "string" ? schema.type : void 0;
-      if (type === void 0 || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) return `${pathName(path7)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
+      if (type === void 0 || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) return `${pathName(path8)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
       const lower = raw2.toLowerCase();
       const prior = seenLower.get(lower);
       if (prior !== void 0) return `x-mcp-header '${raw2}' is not case-insensitively unique (also declared as '${prior}')`;
       seenLower.set(lower, raw2);
       declarations.push({
-        path: path7,
+        path: path8,
         headerName: raw2,
         type
       });
     }
     const properties = schema.properties;
     if (properties !== null && typeof properties === "object") for (const [key, child] of Object.entries(properties)) {
-      const fault$1 = visit(child, [...path7, key], reachable);
+      const fault$1 = visit(child, [...path8, key], reachable);
       if (fault$1 !== void 0) return fault$1;
     }
     for (const k of NON_REACHABLE_SUBSCHEMA_KEYWORDS) {
@@ -10245,7 +10245,7 @@ function scanXMcpHeaderDeclarations(inputSchema) {
       if (sub === void 0) continue;
       const branches = Array.isArray(sub) ? sub : sub !== null && typeof sub === "object" && OBJECT_VALUED_SUBSCHEMA_KEYWORDS.has(k) ? Object.values(sub) : [sub];
       for (const branch of branches) {
-        const fault$1 = visit(branch, [...path7, `<${k}>`], false);
+        const fault$1 = visit(branch, [...path8, `<${k}>`], false);
         if (fault$1 !== void 0) return fault$1;
       }
     }
@@ -10285,8 +10285,8 @@ var OBJECT_VALUED_SUBSCHEMA_KEYWORDS = /* @__PURE__ */ new Set([
   "$defs",
   "definitions"
 ]);
-function pathName(path7) {
-  return path7.length === 0 ? "<root>" : path7.join(".");
+function pathName(path8) {
+  return path8.length === 0 ? "<root>" : path8.join(".");
 }
 var BASE64_SENTINEL_PREFIX = "=?base64?";
 var BASE64_SENTINEL_SUFFIX = "?=";
@@ -10317,9 +10317,9 @@ function decodeMcpParamValue(value) {
     return;
   }
 }
-function valueAtPath(root, path7) {
+function valueAtPath(root, path8) {
   let node = root;
-  for (const key of path7) {
+  for (const key of path8) {
     if (node === null || typeof node !== "object") return void 0;
     node = node[key];
   }
@@ -10813,7 +10813,7 @@ var PROPERTY_KEYS_BY_TYPE = {
   array: shapeKeys([UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema])
 };
 var SUPPORTED_STRING_FORMATS = new Set(StringSchemaSchema.shape.format.unwrap().options);
-function walkProperty(node, path7, vendor, unsupported) {
+function walkProperty(node, path8, vendor, unsupported) {
   if (!isJsonObject(node)) return node;
   const allowedKeys = typeof node.type === "string" && Object.hasOwn(PROPERTY_KEYS_BY_TYPE, node.type) ? PROPERTY_KEYS_BY_TYPE[node.type] : void 0;
   if (allowedKeys === void 0) return node;
@@ -10821,8 +10821,8 @@ function walkProperty(node, path7, vendor, unsupported) {
   for (const [key, value] of Object.entries(node)) if (allowedKeys.has(key) || isAnnotationOnlyJsonSchemaKeyword(key)) pruned[key] = value;
   else if (key === "pattern" && node.type === "string" && typeof node.format === "string") {
     if (!SUPPORTED_STRING_FORMATS.has(node.format)) pruned[key] = value;
-    else if (typeof value !== "string" || !isLibraryFormatPattern(node.format, value, vendor)) unsupported.push(`${path7}.${key}`);
-  } else unsupported.push(`${path7}.${key}`);
+    else if (typeof value !== "string" || !isLibraryFormatPattern(node.format, value, vendor)) unsupported.push(`${path8}.${key}`);
+  } else unsupported.push(`${path8}.${key}`);
   return pruned;
 }
 function walkRequestedSchema(converted, vendor) {
@@ -10839,11 +10839,11 @@ function describeUnsupportedProperties(pruned, fallback) {
   const offenders = Object.entries(pruned.properties).filter(([, node]) => !parseSchema(PrimitiveSchemaDefinitionSchema, node).success).map(([name]) => `properties.${name}`);
   return offenders.length > 0 ? offenders.join(", ") : fallback;
 }
-function findDroppedConstraintPaths(original, parsed, path7 = "") {
-  if (Array.isArray(original) && Array.isArray(parsed)) return original.flatMap((item, index) => findDroppedConstraintPaths(item, parsed[index], `${path7}[${index}]`));
+function findDroppedConstraintPaths(original, parsed, path8 = "") {
+  if (Array.isArray(original) && Array.isArray(parsed)) return original.flatMap((item, index) => findDroppedConstraintPaths(item, parsed[index], `${path8}[${index}]`));
   if (!isJsonObject(original) || !isJsonObject(parsed)) return [];
   return Object.entries(original).flatMap(([key, value]) => {
-    const childPath = path7 ? `${path7}.${key}` : key;
+    const childPath = path8 ? `${path8}.${key}` : key;
     if (!Object.prototype.hasOwnProperty.call(parsed, key)) return isAnnotationOnlyJsonSchemaKeyword(key) ? [] : [childPath];
     return findDroppedConstraintPaths(value, parsed[key], childPath);
   });
@@ -15137,8 +15137,8 @@ var require_utils = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     for (let i = 0; i < str.length; i++) if (str[i] === token) ind++;
     return ind;
   }
-  function removeDotSegments(path7) {
-    let input = path7;
+  function removeDotSegments(path8) {
+    let input = path8;
     const output = [];
     let nextSlash = -1;
     let len = 0;
@@ -15291,8 +15291,8 @@ var require_schemes = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       wsComponent.secure = void 0;
     }
     if (wsComponent.resourceName) {
-      const [path7, query] = wsComponent.resourceName.split("?");
-      wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
+      const [path8, query] = wsComponent.resourceName.split("?");
+      wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
       wsComponent.query = query;
       wsComponent.resourceName = void 0;
     }
@@ -21819,6 +21819,7 @@ var TEMPLATE_DIR = path2.join(REPO_ROOT, "templates", "plugin");
 var PUBLIC_DIR = resolvePublicDir(REPO_ROOT);
 var YARD_DIR = path2.join(REPO_ROOT, ".yard");
 var SESSION_FILE = path2.join(YARD_DIR, "state.json");
+var EMBEDDINGS_DIR = path2.join(YARD_DIR, "embeddings");
 var YARD_PLUGIN_DIR = path2.join(REPO_ROOT, "plugins", "yard");
 
 // src/types.ts
@@ -21826,14 +21827,16 @@ var ARTIFACT_KINDS = ["skill", "rule", "agent", "command", "hook", "mcp"];
 function artifactId(plugin, kind, name) {
   return `${plugin}/${kind}/${name}`;
 }
-function defaultSession() {
+function defaultSession(embeddingsModel = "voyageai/voyage-4-lite") {
   return {
     dynamicMode: false,
     pinned: [],
     hydrated: [],
     hooksActive: [],
     mcpLive: [],
-    disabledPlugins: []
+    disabledPlugins: [],
+    embeddingsEnabled: false,
+    embeddingsModel
   };
 }
 
@@ -22044,9 +22047,284 @@ function indexOf(artifact) {
   return index;
 }
 
+// src/embed.ts
+import { createHash } from "node:crypto";
+import { mkdir as mkdir2, readFile as readFile3, rename, writeFile as writeFile2 } from "node:fs/promises";
+import path4 from "node:path";
+var DEFAULT_EMBEDDINGS_MODEL = "voyageai/voyage-4-lite";
+var OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
+var BATCH = 32;
+var MAX_CHARS = 8e3;
+var MAX_QUERY_CACHE = 200;
+function defaultEmbeddingsModel() {
+  return process.env.YARD_EMBEDDINGS_MODEL?.trim() || DEFAULT_EMBEDDINGS_MODEL;
+}
+function openRouterApiKey() {
+  const key = process.env.OPENROUTER_API_KEY?.trim();
+  return key ? key : void 0;
+}
+function createOpenRouterEmbedder(apiKey, model) {
+  return {
+    model,
+    async embed(texts) {
+      if (texts.length === 0) {
+        return [];
+      }
+      const out = [];
+      for (let i = 0; i < texts.length; i += BATCH) {
+        const batch = texts.slice(i, i + BATCH);
+        const res = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/yannelli/skills",
+            "X-Title": "Yard"
+          },
+          body: JSON.stringify({
+            model,
+            input: batch.length === 1 ? batch[0] : batch,
+            encoding_format: "float"
+          })
+        });
+        if (!res.ok) {
+          throw new Error(`OpenRouter embeddings ${res.status}: ${await res.text()}`);
+        }
+        const json = await res.json();
+        const rows = [...json.data ?? []].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+        if (rows.length !== batch.length) {
+          throw new Error(`OpenRouter embeddings returned ${rows.length} vectors for ${batch.length} inputs`);
+        }
+        for (const row of rows) {
+          if (!row.embedding?.length) {
+            throw new Error("OpenRouter embeddings response missing a vector");
+          }
+          out.push(row.embedding);
+        }
+      }
+      return out;
+    }
+  };
+}
+function artifactEmbedText(item) {
+  const raw2 = `${item.id}
+${item.kind}
+${item.name}
+${item.description}
+${item.body}`;
+  return raw2.length > MAX_CHARS ? raw2.slice(0, MAX_CHARS) : raw2;
+}
+function contentHash(text) {
+  return createHash("sha256").update(text).digest("hex");
+}
+function cosine(a, b) {
+  if (a.length === 0 || a.length !== b.length) {
+    return 0;
+  }
+  let dot = 0;
+  let left = 0;
+  let right = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    dot += x * y;
+    left += x * x;
+    right += y * y;
+  }
+  if (left === 0 || right === 0) {
+    return 0;
+  }
+  return dot / Math.sqrt(left * right);
+}
+var EmbeddingStore = class {
+  constructor(dir) {
+    this.dir = dir;
+  }
+  async load(model) {
+    try {
+      const raw2 = JSON.parse(await readFile3(this.fileFor(model), "utf8"));
+      if (raw2.model !== model || !raw2.artifacts || !raw2.queries) {
+        return emptyCache(model);
+      }
+      return raw2;
+    } catch {
+      return emptyCache(model);
+    }
+  }
+  async save(cache) {
+    await mkdir2(this.dir, { recursive: true });
+    const dest = this.fileFor(cache.model);
+    const tmp = `${dest}.${process.pid}.tmp`;
+    await writeFile2(tmp, `${JSON.stringify(cache)}
+`);
+    await rename(tmp, dest);
+  }
+  artifactCount(cache) {
+    return Object.keys(cache.artifacts).length;
+  }
+  fileFor(model) {
+    return path4.join(this.dir, `${model.replaceAll("/", "__")}.json`);
+  }
+};
+var Embeddings = class _Embeddings {
+  constructor(store, apiKey, fallbackModel = defaultEmbeddingsModel(), factory = createOpenRouterEmbedder) {
+    this.store = store;
+    this.apiKey = apiKey;
+    this.fallbackModel = fallbackModel;
+    this.factory = factory;
+  }
+  queue = Promise.resolve();
+  embedders = /* @__PURE__ */ new Map();
+  static none(dir = path4.join(process.cwd(), ".yard", "embeddings")) {
+    return new _Embeddings(new EmbeddingStore(dir), void 0);
+  }
+  available() {
+    return Boolean(this.apiKey);
+  }
+  model() {
+    return this.fallbackModel;
+  }
+  async status(model = this.fallbackModel) {
+    const cache = await this.store.load(model);
+    return {
+      available: this.available(),
+      model,
+      cached: this.store.artifactCount(cache)
+    };
+  }
+  async vectorsFor(artifacts, query, model) {
+    return this.enqueue(async () => {
+      const embedder = this.embedder(model);
+      const cache = await this.store.load(model);
+      const queryKey = contentHash(query);
+      let queryVector = cache.queries[queryKey]?.vector;
+      const missingTexts = [];
+      const missingIds = [];
+      const hashes = artifacts.map((item) => contentHash(artifactEmbedText(item)));
+      for (let i = 0; i < artifacts.length; i += 1) {
+        const item = artifacts[i];
+        const hash = hashes[i];
+        if (!item || !hash) {
+          continue;
+        }
+        const hit = cache.artifacts[item.id];
+        if (!hit || hit.hash !== hash) {
+          missingIds.push(item.id);
+          missingTexts.push(artifactEmbedText(item));
+        }
+      }
+      const toEmbed = queryVector ? missingTexts : [query, ...missingTexts];
+      if (toEmbed.length > 0) {
+        const vectors = await embedder.embed(toEmbed);
+        let offset = 0;
+        if (!queryVector) {
+          const next = vectors[0];
+          if (!next) {
+            throw new Error("OpenRouter embeddings returned no query vector");
+          }
+          queryVector = next;
+          offset = 1;
+        }
+        for (let i = 0; i < missingIds.length; i += 1) {
+          const id = missingIds[i];
+          const item = artifacts.find((row) => row.id === id);
+          const vector = vectors[offset + i];
+          if (!id || !item || !vector) {
+            continue;
+          }
+          cache.artifacts[id] = { hash: contentHash(artifactEmbedText(item)), vector };
+        }
+        cache.queries[queryKey] = { vector: queryVector };
+        trimQueries(cache);
+        await this.store.save(cache);
+      }
+      if (!queryVector) {
+        throw new Error("query embedding is missing");
+      }
+      return {
+        query: queryVector,
+        artifacts: artifacts.map((item) => {
+          const hash = contentHash(artifactEmbedText(item));
+          const hit = cache.artifacts[item.id];
+          if (!hit || hit.hash !== hash) {
+            throw new Error(`missing embedding for ${item.id}`);
+          }
+          return hit.vector;
+        })
+      };
+    });
+  }
+  async reindex(artifacts, model) {
+    return this.enqueue(async () => {
+      const embedder = this.embedder(model);
+      const cache = await this.store.load(model);
+      const missingTexts = [];
+      const missingIds = [];
+      for (const item of artifacts) {
+        const hash = contentHash(artifactEmbedText(item));
+        const hit = cache.artifacts[item.id];
+        if (!hit || hit.hash !== hash) {
+          missingIds.push(item.id);
+          missingTexts.push(artifactEmbedText(item));
+        }
+      }
+      if (missingTexts.length > 0) {
+        const vectors = await embedder.embed(missingTexts);
+        for (let i = 0; i < missingIds.length; i += 1) {
+          const id = missingIds[i];
+          const item = artifacts.find((row) => row.id === id);
+          const vector = vectors[i];
+          if (!id || !item || !vector) {
+            continue;
+          }
+          cache.artifacts[id] = { hash: contentHash(artifactEmbedText(item)), vector };
+        }
+        await this.store.save(cache);
+      }
+      return {
+        available: this.available(),
+        model,
+        cached: this.store.artifactCount(cache)
+      };
+    });
+  }
+  embedder(model) {
+    if (!this.apiKey) {
+      throw new Error("OPENROUTER_API_KEY is not set");
+    }
+    const cached2 = this.embedders.get(model);
+    if (cached2) {
+      return cached2;
+    }
+    const created = this.factory(this.apiKey, model);
+    this.embedders.set(model, created);
+    return created;
+  }
+  enqueue(fn) {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.then(
+      () => void 0,
+      () => void 0
+    );
+    return run;
+  }
+};
+function emptyCache(model) {
+  return { model, artifacts: {}, queries: {} };
+}
+function trimQueries(cache) {
+  const keys = Object.keys(cache.queries);
+  if (keys.length <= MAX_QUERY_CACHE) {
+    return;
+  }
+  for (const key of keys.slice(0, keys.length - MAX_QUERY_CACHE)) {
+    delete cache.queries[key];
+  }
+}
+
 // src/http.ts
-import { readFile as readFile4, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
-import path5 from "node:path";
+import { readFile as readFile5, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
+import path6 from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 var PerRequestHTTPServerTransport = class {
@@ -23439,26 +23717,26 @@ var handleParsingNestedValues = (form, key, value) => {
 };
 
 // node_modules/hono/dist/utils/url.js
-var splitPath = (path7) => {
-  const paths = path7.split("/");
+var splitPath = (path8) => {
+  const paths = path8.split("/");
   if (paths[0] === "") {
     paths.shift();
   }
   return paths;
 };
 var splitRoutingPath = (routePath) => {
-  const { groups, path: path7 } = extractGroupsFromPath(routePath);
-  const paths = splitPath(path7);
+  const { groups, path: path8 } = extractGroupsFromPath(routePath);
+  const paths = splitPath(path8);
   return replaceGroupMarks(paths, groups);
 };
-var extractGroupsFromPath = (path7) => {
+var extractGroupsFromPath = (path8) => {
   const groups = [];
-  path7 = path7.replace(/\{[^}]+\}/g, (match2, index) => {
+  path8 = path8.replace(/\{[^}]+\}/g, (match2, index) => {
     const mark = `@${index}`;
     groups.push([mark, match2]);
     return mark;
   });
-  return { groups, path: path7 };
+  return { groups, path: path8 };
 };
 var replaceGroupMarks = (paths, groups) => {
   for (let i = groups.length - 1; i >= 0; i--) {
@@ -23515,8 +23793,8 @@ var getPath = (request) => {
       const queryIndex = url2.indexOf("?", i);
       const hashIndex = url2.indexOf("#", i);
       const end = queryIndex === -1 ? hashIndex === -1 ? void 0 : hashIndex : hashIndex === -1 ? queryIndex : Math.min(queryIndex, hashIndex);
-      const path7 = url2.slice(start, end);
-      return tryDecodeURI(path7.includes("%25") ? path7.replace(/%25/g, "%2525") : path7);
+      const path8 = url2.slice(start, end);
+      return tryDecodeURI(path8.includes("%25") ? path8.replace(/%25/g, "%2525") : path8);
     } else if (charCode === 63 || charCode === 35) {
       break;
     }
@@ -23533,11 +23811,11 @@ var mergePath = (base, sub, ...rest) => {
   }
   return `${base?.[0] === "/" ? "" : "/"}${base}${sub === "/" ? "" : `${base?.at(-1) === "/" ? "" : "/"}${sub?.[0] === "/" ? sub.slice(1) : sub}`}`;
 };
-var checkOptionalParameter = (path7) => {
-  if (path7.charCodeAt(path7.length - 1) !== 63 || !path7.includes(":")) {
+var checkOptionalParameter = (path8) => {
+  if (path8.charCodeAt(path8.length - 1) !== 63 || !path8.includes(":")) {
     return null;
   }
-  const segments = path7.split("/");
+  const segments = path8.split("/");
   const results = [];
   let basePath = "";
   segments.forEach((segment) => {
@@ -23675,9 +23953,9 @@ var HonoRequest = class {
    */
   path;
   bodyCache = {};
-  constructor(request, path7 = "/", matchResult = [[]]) {
+  constructor(request, path8 = "/", matchResult = [[]]) {
     this.raw = request;
-    this.path = path7;
+    this.path = path8;
     this.#matchResult = matchResult;
   }
   param(key) {
@@ -24444,8 +24722,8 @@ var Hono = class _Hono {
         return this;
       };
     });
-    this.on = (method, path7, ...handlers) => {
-      for (const p of [path7].flat()) {
+    this.on = (method, path8, ...handlers) => {
+      for (const p of [path8].flat()) {
         this.#path = p;
         for (const m of [method].flat()) {
           handlers.map((handler) => {
@@ -24502,8 +24780,8 @@ var Hono = class _Hono {
    * app.route("/api", app2) // GET /api/user
    * ```
    */
-  route(path7, app) {
-    const subApp = this.basePath(path7);
+  route(path8, app) {
+    const subApp = this.basePath(path8);
     app.routes.map((r) => {
       let handler;
       if (app.errorHandler === errorHandler) {
@@ -24529,9 +24807,9 @@ var Hono = class _Hono {
    * const api = new Hono().basePath('/api')
    * ```
    */
-  basePath(path7) {
+  basePath(path8) {
     const subApp = this.#clone();
-    subApp._basePath = mergePath(this._basePath, path7);
+    subApp._basePath = mergePath(this._basePath, path8);
     return subApp;
   }
   /**
@@ -24605,7 +24883,7 @@ var Hono = class _Hono {
    * })
    * ```
    */
-  mount(path7, applicationHandler, options) {
+  mount(path8, applicationHandler, options) {
     let replaceRequest;
     let optionHandler;
     if (options) {
@@ -24632,7 +24910,7 @@ var Hono = class _Hono {
       return [c.env, executionContext];
     };
     replaceRequest ||= (() => {
-      const mergedPath = mergePath(this._basePath, path7);
+      const mergedPath = mergePath(this._basePath, path8);
       const pathPrefixLength = mergedPath === "/" ? 0 : mergedPath.length;
       return (request) => {
         const url2 = new URL(request.url);
@@ -24647,19 +24925,19 @@ var Hono = class _Hono {
       }
       await next();
     };
-    this.#addRoute(METHOD_NAME_ALL, mergePath(path7, "*"), handler);
+    this.#addRoute(METHOD_NAME_ALL, mergePath(path8, "*"), handler);
     return this;
   }
-  #addRoute(method, path7, handler, baseRoutePath) {
+  #addRoute(method, path8, handler, baseRoutePath) {
     method = method.toUpperCase();
-    path7 = mergePath(this._basePath, path7);
+    path8 = mergePath(this._basePath, path8);
     const r = {
       basePath: baseRoutePath !== void 0 ? mergePath(this._basePath, baseRoutePath) : this._basePath,
-      path: path7,
+      path: path8,
       method,
       handler
     };
-    this.router.add(method, path7, [handler, r]);
+    this.router.add(method, path8, [handler, r]);
     this.routes.push(r);
   }
   #handleError(err, c) {
@@ -24672,10 +24950,10 @@ var Hono = class _Hono {
     if (method === "HEAD") {
       return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
     }
-    const path7 = this.getPath(request, { env });
-    const matchResult = this.router.match(method, path7);
+    const path8 = this.getPath(request, { env });
+    const matchResult = this.router.match(method, path8);
     const c = new Context(request, {
-      path: path7,
+      path: path8,
       matchResult,
       env,
       executionCtx,
@@ -24775,7 +25053,7 @@ var Hono = class _Hono {
 
 // node_modules/hono/dist/router/reg-exp-router/matcher.js
 var emptyParam = [];
-function match(method, path7) {
+function match(method, path8) {
   const matchers = this.buildAllMatchers();
   const match2 = ((method2, path22) => {
     const matcher = matchers[method2] || matchers[METHOD_NAME_ALL];
@@ -24791,7 +25069,7 @@ function match(method, path7) {
     return [matcher[1][index], match3];
   });
   this.match = match2;
-  return match2(method, path7);
+  return match2(method, path8);
 }
 
 // node_modules/hono/dist/router/reg-exp-router/node.js
@@ -24908,14 +25186,14 @@ var Trie = class {
   #index = 0;
   // dynamic path -> [handler index, param assoc]; static paths are not registered
   paths = /* @__PURE__ */ Object.create(null);
-  insert(path7, isStatic) {
+  insert(path8, isStatic) {
     if (isStatic) {
-      this.#root.insert(path7.split(""), 0, [], this.#context, true);
+      this.#root.insert(path8.split(""), 0, [], this.#context, true);
       return;
     }
     const paramAssoc = [];
     const groups = [];
-    let markedPath = path7;
+    let markedPath = path8;
     for (let i = 0; ; ) {
       let replaced = false;
       markedPath = markedPath.replace(/\{[^}]+\}/g, (m) => {
@@ -24940,7 +25218,7 @@ var Trie = class {
       }
     }
     this.#root.insert(tokens, this.#index, paramAssoc, this.#context, false);
-    this.paths[path7] = [this.#index++, paramAssoc];
+    this.paths[path8] = [this.#index++, paramAssoc];
   }
   buildRegExp() {
     let regexp = this.#root.buildRegExpStr();
@@ -24967,9 +25245,9 @@ var Trie = class {
 
 // node_modules/hono/dist/router/reg-exp-router/router.js
 var wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
-function buildWildcardRegExp(path7) {
-  return wildcardRegExpCache[path7] ??= new RegExp(
-    path7 === "*" ? "" : `^${path7.replace(
+function buildWildcardRegExp(path8) {
+  return wildcardRegExpCache[path8] ??= new RegExp(
+    path8 === "*" ? "" : `^${path8.replace(
       /\/\*$|([.\\+*[^\]$()])/g,
       (_, metaChar) => metaChar ? `\\${metaChar}` : "(?:|/.*)"
     )}$`
@@ -24978,12 +25256,12 @@ function buildWildcardRegExp(path7) {
 function clearWildcardRegExpCache() {
   wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
 }
-function findMiddleware(middleware, path7) {
+function findMiddleware(middleware, path8) {
   if (!middleware) {
     return void 0;
   }
   for (const k of Object.keys(middleware).sort((a, b) => b.length - a.length)) {
-    if (buildWildcardRegExp(k).test(path7)) {
+    if (buildWildcardRegExp(k).test(path8)) {
       return [...middleware[k]];
     }
   }
@@ -24999,14 +25277,14 @@ var RegExpRouter = class {
     this.#routes = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
     this.#tries = { [METHOD_NAME_ALL]: new Trie() };
   }
-  #insertPath(method, path7) {
+  #insertPath(method, path8) {
     try {
-      this.#tries[method].insert(path7, !/\*|\/:/.test(path7));
+      this.#tries[method].insert(path8, !/\*|\/:/.test(path8));
     } catch (e) {
-      throw e === PATH_ERROR ? new UnsupportedPathError(path7) : e;
+      throw e === PATH_ERROR ? new UnsupportedPathError(path8) : e;
     }
   }
-  add(method, path7, handler) {
+  add(method, path8, handler) {
     const middleware = this.#middleware;
     const routes = this.#routes;
     if (!middleware || !routes) {
@@ -25022,16 +25300,16 @@ var RegExpRouter = class {
         });
       });
     }
-    if (path7 === "/*") {
-      path7 = "*";
+    if (path8 === "/*") {
+      path8 = "*";
     }
-    const paramCount = (path7.match(/\/:/g) || []).length;
-    if (/\*$/.test(path7)) {
-      const re = buildWildcardRegExp(path7);
+    const paramCount = (path8.match(/\/:/g) || []).length;
+    if (/\*$/.test(path8)) {
+      const re = buildWildcardRegExp(path8);
       Object.keys(middleware).forEach((m) => {
-        if ((method === METHOD_NAME_ALL || method === m) && !middleware[m][path7]) {
-          this.#insertPath(m, path7);
-          middleware[m][path7] = findMiddleware(middleware[m], path7) || findMiddleware(middleware[METHOD_NAME_ALL], path7) || [];
+        if ((method === METHOD_NAME_ALL || method === m) && !middleware[m][path8]) {
+          this.#insertPath(m, path8);
+          middleware[m][path8] = findMiddleware(middleware[m], path8) || findMiddleware(middleware[METHOD_NAME_ALL], path8) || [];
         }
       });
       Object.keys(middleware).forEach((m) => {
@@ -25050,7 +25328,7 @@ var RegExpRouter = class {
       });
       return;
     }
-    const paths = checkOptionalParameter(path7) || [path7];
+    const paths = checkOptionalParameter(path8) || [path8];
     for (let i = 0, len = paths.length; i < len; i++) {
       const path22 = paths[i];
       Object.keys(routes).forEach((m) => {
@@ -25083,11 +25361,11 @@ var RegExpRouter = class {
     const staticMap = /* @__PURE__ */ Object.create(null);
     const handlerData = [];
     [middleware, routes].forEach((r) => {
-      for (const path7 in r) {
-        const handlers = r[path7];
-        const pathData = trie.paths[path7];
+      for (const path8 in r) {
+        const handlers = r[path8];
+        const pathData = trie.paths[path8];
         if (!pathData) {
-          staticMap[path7] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
+          staticMap[path8] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
           continue;
         }
         const paramAssoc = pathData[1];
@@ -25131,13 +25409,13 @@ var SmartRouter = class {
   constructor(init) {
     this.#routers = init.routers;
   }
-  add(method, path7, handler) {
+  add(method, path8, handler) {
     if (!this.#routes) {
       throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
     }
-    this.#routes.push([method, path7, handler]);
+    this.#routes.push([method, path8, handler]);
   }
-  match(method, path7) {
+  match(method, path8) {
     if (!this.#routes) {
       throw new Error("Fatal error");
     }
@@ -25152,7 +25430,7 @@ var SmartRouter = class {
         for (let i2 = 0, len2 = routes.length; i2 < len2; i2++) {
           router.add(...routes[i2]);
         }
-        res = router.match(method, path7);
+        res = router.match(method, path8);
       } catch (e) {
         if (e instanceof UnsupportedPathError) {
           continue;
@@ -25202,10 +25480,10 @@ var Node2 = class _Node2 {
     }
     this.#patterns = [];
   }
-  insert(method, path7, handler) {
+  insert(method, path8, handler) {
     this.#order = ++this.#order;
     let curNode = this;
-    const parts = splitRoutingPath(path7);
+    const parts = splitRoutingPath(path8);
     const possibleKeys = [];
     for (let i = 0, len = parts.length; i < len; i++) {
       const p = parts[i];
@@ -25254,12 +25532,12 @@ var Node2 = class _Node2 {
       }
     }
   }
-  search(method, path7) {
+  search(method, path8) {
     const handlerSets = [];
     this.#params = emptyParams;
     const curNode = this;
     let curNodes = [curNode];
-    const parts = splitPath(path7);
+    const parts = splitPath(path8);
     const curNodesQueue = [];
     const len = parts.length;
     let partOffsets = null;
@@ -25301,13 +25579,13 @@ var Node2 = class _Node2 {
           if (matcher instanceof RegExp) {
             if (partOffsets === null) {
               partOffsets = new Array(len);
-              let offset = path7[0] === "/" ? 1 : 0;
+              let offset = path8[0] === "/" ? 1 : 0;
               for (let p = 0; p < len; p++) {
                 partOffsets[p] = offset;
                 offset += parts[p].length + 1;
               }
             }
-            const restPathString = path7.substring(partOffsets[i]);
+            const restPathString = path8.substring(partOffsets[i]);
             const m = matcher.exec(restPathString);
             if (m) {
               params[name] = m[0];
@@ -25369,18 +25647,18 @@ var TrieRouter = class {
   constructor() {
     this.#node = new Node2();
   }
-  add(method, path7, handler) {
-    const results = checkOptionalParameter(path7);
+  add(method, path8, handler) {
+    const results = checkOptionalParameter(path8);
     if (results) {
       for (let i = 0, len = results.length; i < len; i++) {
         this.#node.insert(method, results[i], handler);
       }
       return;
     }
-    this.#node.insert(method, path7, handler);
+    this.#node.insert(method, path8, handler);
   }
-  match(method, path7) {
-    return this.#node.search(method, path7);
+  match(method, path8) {
+    return this.#node.search(method, path8);
   }
 };
 
@@ -25436,13 +25714,29 @@ function localhostOriginValidation() {
 }
 
 // src/search.ts
+async function searchCatalog(artifacts, query, semantic) {
+  if (!semantic || !query.query.trim()) {
+    return { hits: searchArtifacts(artifacts, query), mode: "lexical" };
+  }
+  const filtered = filterArtifacts(artifacts, query);
+  const limit = query.limit ?? 20;
+  const vectors = await semantic.embeddings.vectorsFor(filtered, query.query, semantic.model);
+  const tokens = tokenize(query.query);
+  const scored = filtered.map((item, index) => {
+    const lex = scoreArtifact(item, tokens, query.query);
+    const cos = cosine(vectors.query, vectors.artifacts[index] ?? []);
+    return { item, score: lex + cos * 80, lex, cos };
+  }).filter((row) => row.lex > 0 || row.cos >= 0.18).sort((a, b) => b.score - a.score || a.item.id.localeCompare(b.item.id));
+  return { hits: scored.slice(0, limit).map((row) => row.item), mode: "embeddings" };
+}
 function searchArtifacts(artifacts, query) {
   const tokens = tokenize(query.query);
-  const kinds = query.kinds;
-  const plugin = query.plugin;
   const limit = query.limit ?? 20;
-  const scored = artifacts.filter((item) => kinds ? kinds.includes(item.kind) : true).filter((item) => plugin ? item.plugin === plugin : true).map((item) => ({ item, score: scoreArtifact(item, tokens, query.query) })).filter((row) => row.score > 0 || tokens.length === 0).sort((a, b) => b.score - a.score || a.item.id.localeCompare(b.item.id));
+  const scored = filterArtifacts(artifacts, query).map((item) => ({ item, score: scoreArtifact(item, tokens, query.query) })).filter((row) => row.score > 0 || tokens.length === 0).sort((a, b) => b.score - a.score || a.item.id.localeCompare(b.item.id));
   return scored.slice(0, limit).map((row) => row.item);
+}
+function filterArtifacts(artifacts, query) {
+  return artifacts.filter((item) => query.kinds ? query.kinds.includes(item.kind) : true).filter((item) => query.plugin ? item.plugin === query.plugin : true);
 }
 function scoreArtifact(item, tokens, rawQuery) {
   if (tokens.length === 0) {
@@ -25484,7 +25778,7 @@ function tokenize(query) {
 
 // src/mcp.ts
 var KindSchema = _enum(ARTIFACT_KINDS);
-function createYardServer(catalog, session) {
+function createYardServer(catalog, session, embeddings = Embeddings.none()) {
   const server = new McpServer({
     name: "yard",
     version: "0.1.0"
@@ -25493,7 +25787,7 @@ function createYardServer(catalog, session) {
     "catalog_search",
     {
       title: "Search catalog",
-      description: "Search marketplace skills, rules, agents, commands, hooks, and MCP servers. Returns metadata only. In dynamic mode, hydrate an id to load its body and activate that plugin\u2019s hooks and MCP.",
+      description: "Search marketplace skills, rules, agents, commands, hooks, and MCP servers. Returns metadata only. Uses OpenRouter embeddings when embeddings search is enabled. In dynamic mode, hydrate an id to load its body and activate that plugin\u2019s hooks and MCP.",
       inputSchema: object({
         query: string2().describe("Free-text query. Empty lists the catalog."),
         kinds: array(KindSchema).optional(),
@@ -25504,13 +25798,19 @@ function createYardServer(catalog, session) {
     },
     async ({ query, kinds, plugin, limit }) => {
       const { artifacts } = await catalog.load();
-      const hits = searchArtifacts(artifacts, {
-        query,
-        ...kinds ? { kinds } : {},
-        ...plugin ? { plugin } : {},
-        ...limit !== void 0 ? { limit } : {}
-      }).map(indexOf);
-      return textResult({ hits, count: hits.length });
+      const view = await session.view();
+      const semantic = view.embeddingsEnabled && embeddings.available() ? { embeddings, model: view.embeddingsModel } : void 0;
+      const { hits, mode } = await searchCatalog(
+        artifacts,
+        {
+          query,
+          ...kinds ? { kinds } : {},
+          ...plugin ? { plugin } : {},
+          ...limit !== void 0 ? { limit } : {}
+        },
+        semantic
+      );
+      return textResult({ hits: hits.map(indexOf), count: hits.length, mode, model: view.embeddingsModel });
     }
   );
   server.registerTool(
@@ -25540,7 +25840,7 @@ function createYardServer(catalog, session) {
     "session_status",
     {
       title: "Session status",
-      description: "Dynamic mode, pins, hydrated artifacts, active hooks, live MCP, and the currently available id set.",
+      description: "Dynamic mode, embeddings search, pins, hydrated artifacts, active hooks, live MCP, and the currently available id set.",
       annotations: { readOnlyHint: true, idempotentHint: true }
     },
     async () => textResult(await session.view())
@@ -25555,6 +25855,23 @@ function createYardServer(catalog, session) {
       })
     },
     async ({ enabled }) => textResult(await session.setDynamicMode(enabled))
+  );
+  server.registerTool(
+    "session_set_embeddings",
+    {
+      title: "Set embeddings search",
+      description: "Enable semantic catalog search through OpenRouter. Default model is voyageai/voyage-4-lite. Requires OPENROUTER_API_KEY. Vectors are cached under .yard/embeddings.",
+      inputSchema: object({
+        enabled: boolean2(),
+        model: string2().optional().describe("OpenRouter embedding model id, e.g. voyageai/voyage-4-lite")
+      })
+    },
+    async ({ enabled, model }) => {
+      if (enabled && !embeddings.available()) {
+        throw new Error("OPENROUTER_API_KEY is not set");
+      }
+      return textResult(await session.setEmbeddings({ enabled, ...model ? { model } : {} }));
+    }
   );
   server.registerTool(
     "session_hydrate",
@@ -25699,8 +26016,8 @@ function textResult(value) {
 }
 
 // src/scaffold.ts
-import { cp, readdir as readdir2, readFile as readFile3, rename, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
-import path4 from "node:path";
+import { cp, readdir as readdir2, readFile as readFile4, rename as rename2, stat as stat2, writeFile as writeFile3 } from "node:fs/promises";
+import path5 from "node:path";
 var NAME_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 async function createPlugin(input) {
   const name = input.name.trim();
@@ -25711,17 +26028,17 @@ async function createPlugin(input) {
   if (!description) {
     throw new Error("description is required");
   }
-  const dest = path4.join(PLUGINS_DIR, name);
+  const dest = path5.join(PLUGINS_DIR, name);
   await cp(TEMPLATE_DIR, dest, { recursive: true, errorOnExist: true });
   await replaceInTree(dest, { PLUGIN_NAME: name, PLUGIN_DESCRIPTION: description });
-  await rename(path4.join(dest, "skills", "PLUGIN_NAME"), path4.join(dest, "skills", name));
+  await rename2(path5.join(dest, "skills", "PLUGIN_NAME"), path5.join(dest, "skills", name));
   await addCatalogEntries(name, description);
   return dest;
 }
 async function replaceInTree(root, vars) {
   const walk = async (dir) => {
     for (const entry of await readdir2(dir, { withFileTypes: true })) {
-      const full = path4.join(dir, entry.name);
+      const full = path5.join(dir, entry.name);
       if (entry.isDirectory()) {
         await walk(full);
         continue;
@@ -25729,20 +26046,20 @@ async function replaceInTree(root, vars) {
       if (!(await stat2(full)).isFile()) {
         continue;
       }
-      const raw2 = await readFile3(full, "utf8");
+      const raw2 = await readFile4(full, "utf8");
       let next = raw2;
       for (const [key, value] of Object.entries(vars)) {
         next = next.split(key).join(value);
       }
       if (next !== raw2) {
-        await writeFile2(full, next);
+        await writeFile3(full, next);
       }
     }
   };
   await walk(root);
 }
 async function addCatalogEntries(name, description) {
-  const claude = JSON.parse(await readFile3(CLAUDE_MARKETPLACE, "utf8"));
+  const claude = JSON.parse(await readFile4(CLAUDE_MARKETPLACE, "utf8"));
   claude.plugins.push({
     name,
     source: `./plugins/${name}`,
@@ -25753,18 +26070,18 @@ async function addCatalogEntries(name, description) {
     tags: [name],
     license: "MIT"
   });
-  await writeFile2(CLAUDE_MARKETPLACE, `${JSON.stringify(claude, null, 2)}
+  await writeFile3(CLAUDE_MARKETPLACE, `${JSON.stringify(claude, null, 2)}
 `);
-  const codex = JSON.parse(await readFile3(CODEX_MARKETPLACE, "utf8"));
+  const codex = JSON.parse(await readFile4(CODEX_MARKETPLACE, "utf8"));
   codex.plugins.push({
     name,
     source: { source: "local", path: `./plugins/${name}` },
     policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
     category: "Productivity"
   });
-  await writeFile2(CODEX_MARKETPLACE, `${JSON.stringify(codex, null, 2)}
+  await writeFile3(CODEX_MARKETPLACE, `${JSON.stringify(codex, null, 2)}
 `);
-  const cursor = JSON.parse(await readFile3(CURSOR_MARKETPLACE, "utf8"));
+  const cursor = JSON.parse(await readFile4(CURSOR_MARKETPLACE, "utf8"));
   cursor.plugins.push({
     name,
     source: `./plugins/${name}`,
@@ -25773,7 +26090,7 @@ async function addCatalogEntries(name, description) {
     category: "uncategorized",
     tags: [name]
   });
-  await writeFile2(CURSOR_MARKETPLACE, `${JSON.stringify(cursor, null, 2)}
+  await writeFile3(CURSOR_MARKETPLACE, `${JSON.stringify(cursor, null, 2)}
 `);
 }
 
@@ -25789,27 +26106,66 @@ var MIME = {
   ".woff": "font/woff",
   ".woff2": "font/woff2"
 };
-function createYardApp(catalog, session) {
-  const mcp = createMcpHandler(() => createYardServer(catalog, session));
+function createYardApp(catalog, session, embeddings = Embeddings.none()) {
+  const mcp = createMcpHandler(() => createYardServer(catalog, session, embeddings));
   const app = new Hono2();
   app.use("*", localhostHostValidation());
   app.use("*", localhostOriginValidation());
-  app.get("/api/health", (c) => c.json({ ok: true, name: "yard" }));
+  app.get("/api/health", async (c) => {
+    const view = await session.view();
+    const embeddingsStatus = await embeddings.status(view.embeddingsModel);
+    return c.json({
+      ok: true,
+      name: "yard",
+      embeddings: { ...embeddingsStatus, enabled: view.embeddingsEnabled }
+    });
+  });
+  app.get("/api/embeddings", async (c) => {
+    const view = await session.view();
+    const embeddingsStatus = await embeddings.status(view.embeddingsModel);
+    return c.json({ ...embeddingsStatus, enabled: view.embeddingsEnabled });
+  });
+  app.post("/api/session/embeddings", async (c) => {
+    const body = await c.req.json();
+    if (typeof body.enabled !== "boolean") {
+      return c.json({ error: "enabled is required" }, 400);
+    }
+    if (body.enabled && !embeddings.available()) {
+      return c.json({ error: "OPENROUTER_API_KEY is not set" }, 400);
+    }
+    return c.json(await session.setEmbeddings({ enabled: body.enabled, ...body.model ? { model: body.model } : {} }));
+  });
+  app.post("/api/embeddings/reindex", async (c) => {
+    if (!embeddings.available()) {
+      return c.json({ error: "OPENROUTER_API_KEY is not set" }, 400);
+    }
+    const view = await session.view();
+    const snap = await catalog.load();
+    return c.json(await embeddings.reindex(snap.artifacts, view.embeddingsModel));
+  });
   app.get("/api/catalog", async (c) => {
     const snap = await catalog.load();
+    const view = await session.view();
     const query = c.req.query("q") ?? "";
     const kind = c.req.query("kind");
     const plugin = c.req.query("plugin");
     const kinds = kind && isKind(kind) ? [kind] : void 0;
-    const artifacts = searchArtifacts(snap.artifacts, {
-      query,
-      ...kinds ? { kinds } : {},
-      ...plugin ? { plugin } : {},
-      limit: 100
-    });
+    const semantic = view.embeddingsEnabled && embeddings.available() ? { embeddings, model: view.embeddingsModel } : void 0;
+    const { hits, mode } = await searchCatalog(
+      snap.artifacts,
+      {
+        query,
+        ...kinds ? { kinds } : {},
+        ...plugin ? { plugin } : {},
+        limit: 100
+      },
+      semantic
+    );
+    const embeddingsStatus = await embeddings.status(view.embeddingsModel);
     return c.json({
       plugins: snap.plugins,
-      artifacts: artifacts.map(indexOf)
+      artifacts: hits.map(indexOf),
+      search: { mode, model: view.embeddingsModel, cached: embeddingsStatus.cached }
     });
   });
   app.get("/api/artifact", async (c) => {
@@ -25833,7 +26189,7 @@ function createYardApp(catalog, session) {
     const artifact = await catalog.artifact(id);
     const plugin = await catalog.plugin(artifact.plugin);
     await assertInsideRoot(artifact.path, plugin.root);
-    await writeFile3(artifact.path, body.raw);
+    await writeFile4(artifact.path, body.raw);
     catalog.invalidate();
     const next = await catalog.artifact(id);
     return c.json({ artifact: next });
@@ -25915,7 +26271,7 @@ function createYardApp(catalog, session) {
     if (!file) {
       return c.json({ error: "not found" }, 404);
     }
-    const data = await readFile4(file);
+    const data = await readFile5(file);
     return c.body(data, 200, { "Content-Type": mimeFor(file) });
   });
   app.onError((error2, c) => c.json({ error: error2.message }, 400));
@@ -25930,16 +26286,16 @@ async function readIds(c) {
 }
 async function resolvePublicFile(urlPath) {
   const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
-  const candidate = path5.resolve(PUBLIC_DIR, rel);
-  const root = path5.resolve(PUBLIC_DIR);
-  if (candidate !== root && !candidate.startsWith(root + path5.sep)) {
+  const candidate = path6.resolve(PUBLIC_DIR, rel);
+  const root = path6.resolve(PUBLIC_DIR);
+  if (candidate !== root && !candidate.startsWith(root + path6.sep)) {
     return void 0;
   }
   if (await isFile(candidate)) {
     return candidate;
   }
-  if (!path5.extname(rel) && await isFile(path5.join(PUBLIC_DIR, "index.html"))) {
-    return path5.join(PUBLIC_DIR, "index.html");
+  if (!path6.extname(rel) && await isFile(path6.join(PUBLIC_DIR, "index.html"))) {
+    return path6.join(PUBLIC_DIR, "index.html");
   }
   return void 0;
 }
@@ -25951,12 +26307,12 @@ async function isFile(target) {
   }
 }
 function mimeFor(file) {
-  return MIME[path5.extname(file)] ?? "application/octet-stream";
+  return MIME[path6.extname(file)] ?? "application/octet-stream";
 }
 
 // src/session.ts
-import { mkdir as mkdir2, readFile as readFile5, writeFile as writeFile4 } from "node:fs/promises";
-import path6 from "node:path";
+import { mkdir as mkdir3, readFile as readFile6, writeFile as writeFile5 } from "node:fs/promises";
+import path7 from "node:path";
 var Session = class {
   constructor(catalog, file = SESSION_FILE) {
     this.catalog = catalog;
@@ -25964,18 +26320,21 @@ var Session = class {
   }
   async read() {
     try {
-      const raw2 = JSON.parse(await readFile5(this.file, "utf8"));
+      const raw2 = JSON.parse(await readFile6(this.file, "utf8"));
+      const defaults = defaultSession(defaultEmbeddingsModel());
       return {
-        ...defaultSession(),
+        ...defaults,
         ...raw2,
         pinned: unique(raw2.pinned ?? []),
         hydrated: unique(raw2.hydrated ?? []),
         hooksActive: unique(raw2.hooksActive ?? []),
         mcpLive: unique(raw2.mcpLive ?? []),
-        disabledPlugins: unique(raw2.disabledPlugins ?? [])
+        disabledPlugins: unique(raw2.disabledPlugins ?? []),
+        embeddingsEnabled: Boolean(raw2.embeddingsEnabled),
+        embeddingsModel: raw2.embeddingsModel?.trim() || defaults.embeddingsModel
       };
     } catch {
-      return defaultSession();
+      return defaultSession(defaultEmbeddingsModel());
     }
   }
   async view() {
@@ -26049,6 +26408,15 @@ var Session = class {
   async setMcpLive(ids, active) {
     return this.setLiveField("mcpLive", ids, active);
   }
+  async setEmbeddings(input) {
+    const state = await this.read();
+    state.embeddingsEnabled = input.enabled;
+    if (input.model?.trim()) {
+      state.embeddingsModel = input.model.trim();
+    }
+    await this.write(state);
+    return this.view();
+  }
   async availableIds(state) {
     const { artifacts } = await this.catalog.load();
     const enabled = artifacts.filter((item) => !state.disabledPlugins.includes(item.plugin));
@@ -26095,8 +26463,8 @@ var Session = class {
     }
   }
   async write(state) {
-    await mkdir2(path6.dirname(this.file), { recursive: true });
-    await writeFile4(this.file, `${JSON.stringify(state, null, 2)}
+    await mkdir3(path7.dirname(this.file), { recursive: true });
+    await writeFile5(this.file, `${JSON.stringify(state, null, 2)}
 `);
   }
 };
@@ -26118,13 +26486,17 @@ async function main() {
   const port = portFlag ? Number(portFlag.slice("--port=".length)) : DEFAULT_PORT;
   const catalog = new Catalog();
   const session = new Session(catalog);
+  const embeddings = new Embeddings(new EmbeddingStore(EMBEDDINGS_DIR), openRouterApiKey(), defaultEmbeddingsModel());
   await catalog.load();
   if (stdio) {
     console.error("yard listening on stdio");
-    serveStdio(() => createYardServer(catalog, session));
+    if (embeddings.available()) {
+      console.error(`embeddings  OpenRouter ${defaultEmbeddingsModel()}`);
+    }
+    serveStdio(() => createYardServer(catalog, session, embeddings));
     return;
   }
-  const { app, close } = createYardApp(catalog, session);
+  const { app, close } = createYardApp(catalog, session, embeddings);
   if (existsSync3(PLUGINS_DIR)) {
     watch(PLUGINS_DIR, { recursive: true }, () => catalog.invalidate());
   }

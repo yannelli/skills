@@ -2,10 +2,11 @@ import { serve } from '@hono/node-server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { existsSync, watch } from 'node:fs';
 import { Catalog } from './catalog.js';
+import { Embeddings, EmbeddingStore, defaultEmbeddingsModel, openRouterApiKey } from './embed.js';
 import { createYardApp } from './http.js';
 import { createYardServer } from './mcp.js';
 import { writeMcpFiles } from './mcp-spec.js';
-import { PLUGINS_DIR, REPO_ROOT, YARD_PLUGIN_DIR } from './paths.js';
+import { EMBEDDINGS_DIR, PLUGINS_DIR, REPO_ROOT, YARD_PLUGIN_DIR } from './paths.js';
 import { Session } from './session.js';
 
 const DEFAULT_PORT = 4372;
@@ -24,15 +25,19 @@ async function main(): Promise<void> {
 
   const catalog = new Catalog();
   const session = new Session(catalog);
+  const embeddings = new Embeddings(new EmbeddingStore(EMBEDDINGS_DIR), openRouterApiKey(), defaultEmbeddingsModel());
   await catalog.load();
 
   if (stdio) {
     console.error('yard listening on stdio');
-    serveStdio(() => createYardServer(catalog, session));
+    if (embeddings.available()) {
+      console.error(`embeddings  OpenRouter ${defaultEmbeddingsModel()}`);
+    }
+    serveStdio(() => createYardServer(catalog, session, embeddings));
     return;
   }
 
-  const { app, close } = createYardApp(catalog, session);
+  const { app, close } = createYardApp(catalog, session, embeddings);
   if (existsSync(PLUGINS_DIR)) {
     watch(PLUGINS_DIR, { recursive: true }, () => catalog.invalidate());
   }

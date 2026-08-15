@@ -1,4 +1,5 @@
-import type { ArtifactIndex, ArtifactKind } from './types.js';
+import { cosine, type Embeddings } from './embed.js';
+import type { ArtifactIndex, ArtifactKind, ArtifactRecord } from './types.js';
 
 export type SearchQuery = {
   query: string;
@@ -7,20 +8,45 @@ export type SearchQuery = {
   limit?: number;
 };
 
+export type SearchMode = 'lexical' | 'embeddings';
+
+export async function searchCatalog<T extends ArtifactRecord>(
+  artifacts: T[],
+  query: SearchQuery,
+  semantic?: { embeddings: Embeddings; model: string }
+): Promise<{ hits: T[]; mode: SearchMode }> {
+  if (!semantic || !query.query.trim()) {
+    return { hits: searchArtifacts(artifacts, query), mode: 'lexical' };
+  }
+  const filtered = filterArtifacts(artifacts, query);
+  const limit = query.limit ?? 20;
+  const vectors = await semantic.embeddings.vectorsFor(filtered, query.query, semantic.model);
+  const tokens = tokenize(query.query);
+  const scored = filtered
+    .map((item, index) => {
+      const lex = scoreArtifact(item, tokens, query.query);
+      const cos = cosine(vectors.query, vectors.artifacts[index] ?? []);
+      return { item, score: lex + cos * 80, lex, cos };
+    })
+    .filter((row) => row.lex > 0 || row.cos >= 0.18)
+    .sort((a, b) => b.score - a.score || a.item.id.localeCompare(b.item.id));
+  return { hits: scored.slice(0, limit).map((row) => row.item), mode: 'embeddings' };
+}
+
 export function searchArtifacts<T extends ArtifactIndex>(artifacts: T[], query: SearchQuery): T[] {
   const tokens = tokenize(query.query);
-  const kinds = query.kinds;
-  const plugin = query.plugin;
   const limit = query.limit ?? 20;
-
-  const scored = artifacts
-    .filter((item) => (kinds ? kinds.includes(item.kind) : true))
-    .filter((item) => (plugin ? item.plugin === plugin : true))
+  const scored = filterArtifacts(artifacts, query)
     .map((item) => ({ item, score: scoreArtifact(item, tokens, query.query) }))
     .filter((row) => row.score > 0 || tokens.length === 0)
     .sort((a, b) => b.score - a.score || a.item.id.localeCompare(b.item.id));
-
   return scored.slice(0, limit).map((row) => row.item);
+}
+
+function filterArtifacts<T extends ArtifactIndex>(artifacts: T[], query: SearchQuery): T[] {
+  return artifacts
+    .filter((item) => (query.kinds ? query.kinds.includes(item.kind) : true))
+    .filter((item) => (query.plugin ? item.plugin === query.plugin : true));
 }
 
 function scoreArtifact(item: ArtifactIndex, tokens: string[], rawQuery: string): number {

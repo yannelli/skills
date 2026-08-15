@@ -32,12 +32,22 @@ export type SessionView = {
   hooksActive: string[];
   mcpLive: string[];
   disabledPlugins: string[];
+  embeddingsEnabled: boolean;
+  embeddingsModel: string;
   available: string[];
+};
+
+export type EmbeddingsStatus = {
+  available: boolean;
+  enabled: boolean;
+  model: string;
+  cached: number;
 };
 
 export type CatalogResponse = {
   plugins: PluginRecord[];
   artifacts: ArtifactIndex[];
+  search?: { mode: 'lexical' | 'embeddings'; model: string; cached: number };
 };
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {

@@ -32,6 +32,7 @@ import {
   postIds,
   type ArtifactRecord,
   type CatalogResponse,
+  type EmbeddingsStatus,
   type SessionView,
 } from '@/lib/api'
 import { kindLabel, statusLabel, statusOf, type ArtifactStatus } from '@/lib/status'
@@ -69,6 +70,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   const [pluginName, setPluginName] = useState('')
   const [pluginDescription, setPluginDescription] = useState('')
+  const [embeddings, setEmbeddings] = useState<EmbeddingsStatus | null>(null)
 
   const applySession = useCallback((next: SessionView) => {
     setSession(next)
@@ -82,12 +84,14 @@ export function App() {
     if (kind !== 'all') {
       params.set('kind', kind)
     }
-    const [nextCatalog, nextSession] = await Promise.all([
+    const [nextCatalog, nextSession, nextEmbeddings] = await Promise.all([
       api<CatalogResponse>(`/api/catalog?${params}`),
       api<SessionView>('/api/session'),
+      api<EmbeddingsStatus>('/api/embeddings'),
     ])
     setCatalog(nextCatalog)
     setSession(nextSession)
+    setEmbeddings(nextEmbeddings)
   }, [kind, query])
 
   useEffect(() => {
@@ -114,8 +118,10 @@ export function App() {
     if (!session) {
       return '—'
     }
-    return `${catalog.plugins.length} plugins · ${catalog.artifacts.length} artifacts · ${session.available.length} live`
-  }, [catalog, session])
+    const mode = catalog.search?.mode === 'embeddings' ? 'embed' : 'lex'
+    const cached = embeddings ? ` · ${embeddings.cached} cached` : ''
+    return `${catalog.plugins.length} plugins · ${catalog.artifacts.length} artifacts · ${session.available.length} live · ${mode}${cached}`
+  }, [catalog, embeddings, session])
 
   const selectedStatus = artifact ? statusOf(artifact.id, session) : null
 
@@ -139,6 +145,32 @@ export function App() {
           <span className="leading-tight">
             <span className="block text-sm font-medium">Dynamic</span>
             <span className="block text-xs text-muted-foreground">search, then hydrate</span>
+          </span>
+        </label>
+        <label className="flex items-center gap-3">
+          <Switch
+            checked={Boolean(session?.embeddingsEnabled)}
+            disabled={!embeddings?.available}
+            onCheckedChange={(enabled) => {
+              void api<SessionView>('/api/session/embeddings', {
+                method: 'POST',
+                body: JSON.stringify({
+                  enabled,
+                  model: session?.embeddingsModel ?? 'voyageai/voyage-4-lite',
+                }),
+              })
+                .then(applySession)
+                .then(() => refresh())
+                .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Embeddings failed'))
+            }}
+          />
+          <span className="leading-tight">
+            <span className="block text-sm font-medium">Embeddings</span>
+            <span className="block font-mono text-xs text-muted-foreground">
+              {embeddings?.available
+                ? (session?.embeddingsModel ?? 'voyageai/voyage-4-lite')
+                : 'needs OPENROUTER_API_KEY'}
+            </span>
           </span>
         </label>
         <div className="ml-auto flex items-center gap-3">

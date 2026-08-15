@@ -32,6 +32,8 @@ export type SessionState = {
   hooksActive: string[];
   mcpLive: string[];
   disabledPlugins: string[];
+  embeddingsEnabled: boolean;
+  embeddingsModel: string;
 };
 
 export type SessionView = SessionState & {
@@ -89,13 +91,15 @@ export function kindDirectory(kind: ArtifactKind): string {
   }
 }
 
-export function defaultSession(): SessionState {
+export function defaultSession(embeddingsModel = 'voyageai/voyage-4-lite'): SessionState {
   return {
     dynamicMode: false,
     pinned: [],
     hydrated: [],
     hooksActive: [],
     mcpLive: [],
-    disabledPlugins: []
+    disabledPlugins: [],
+    embeddingsEnabled: false,
+    embeddingsModel
   };
 }

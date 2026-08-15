@@ -4,10 +4,11 @@ import { localhostHostValidation, localhostOriginValidation } from '@modelcontex
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { Hono } from 'hono';
 import { assertInsideRoot, indexOf, type Catalog } from './catalog.js';
+import { Embeddings } from './embed.js';
 import { createYardServer } from './mcp.js';
 import { PUBLIC_DIR } from './paths.js';
 import { createPlugin } from './scaffold.js';
-import { searchArtifacts } from './search.js';
+import { searchCatalog } from './search.js';
 import type { Session } from './session.js';
 import { ARTIFACT_KINDS, type ArtifactKind } from './types.js';
 
@@ -23,29 +24,74 @@ const MIME: Record<string, string> = {
   '.woff2': 'font/woff2'
 };
 
-export function createYardApp(catalog: Catalog, session: Session) {
-  const mcp = createMcpHandler(() => createYardServer(catalog, session));
+export function createYardApp(catalog: Catalog, session: Session, embeddings: Embeddings = Embeddings.none()) {
+  const mcp = createMcpHandler(() => createYardServer(catalog, session, embeddings));
   const app = new Hono();
   app.use('*', localhostHostValidation());
   app.use('*', localhostOriginValidation());
 
-  app.get('/api/health', (c) => c.json({ ok: true, name: 'yard' }));
+  app.get('/api/health', async (c) => {
+    const view = await session.view();
+    const embeddingsStatus = await embeddings.status(view.embeddingsModel);
+    return c.json({
+      ok: true,
+      name: 'yard',
+      embeddings: { ...embeddingsStatus, enabled: view.embeddingsEnabled }
+    });
+  });
+
+  app.get('/api/embeddings', async (c) => {
+    const view = await session.view();
+    const embeddingsStatus = await embeddings.status(view.embeddingsModel);
+    return c.json({ ...embeddingsStatus, enabled: view.embeddingsEnabled });
+  });
+
+  app.post('/api/session/embeddings', async (c) => {
+    const body = await c.req.json<{ enabled?: boolean; model?: string }>();
+    if (typeof body.enabled !== 'boolean') {
+      return c.json({ error: 'enabled is required' }, 400);
+    }
+    if (body.enabled && !embeddings.available()) {
+      return c.json({ error: 'OPENROUTER_API_KEY is not set' }, 400);
+    }
+    return c.json(await session.setEmbeddings({ enabled: body.enabled, ...(body.model ? { model: body.model } : {}) }));
+  });
+
+  app.post('/api/embeddings/reindex', async (c) => {
+    if (!embeddings.available()) {
+      return c.json({ error: 'OPENROUTER_API_KEY is not set' }, 400);
+    }
+    const view = await session.view();
+    const snap = await catalog.load();
+    return c.json(await embeddings.reindex(snap.artifacts, view.embeddingsModel));
+  });
 
   app.get('/api/catalog', async (c) => {
     const snap = await catalog.load();
+    const view = await session.view();
     const query = c.req.query('q') ?? '';
     const kind = c.req.query('kind');
     const plugin = c.req.query('plugin');
     const kinds = kind && isKind(kind) ? [kind] : undefined;
-    const artifacts = searchArtifacts(snap.artifacts, {
-      query,
-      ...(kinds ? { kinds } : {}),
-      ...(plugin ? { plugin } : {}),
-      limit: 100
-    });
+    const semantic =
+      view.embeddingsEnabled && embeddings.available()
+        ? { embeddings, model: view.embeddingsModel }
+        : undefined;
+    const { hits, mode } = await searchCatalog(
+      snap.artifacts,
+      {
+        query,
+        ...(kinds ? { kinds } : {}),
+        ...(plugin ? { plugin } : {}),
+        limit: 100
+      },
+      semantic
+    );
+    const embeddingsStatus = await embeddings.status(view.embeddingsModel);
     return c.json({
       plugins: snap.plugins,
-      artifacts: artifacts.map(indexOf)
+      artifacts: hits.map(indexOf),
+      search: { mode, model: view.embeddingsModel, cached: embeddingsStatus.cached }
     });
   });
 
