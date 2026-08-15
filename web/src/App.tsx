@@ -30,6 +30,7 @@ import {
   ARTIFACT_KINDS,
   api,
   postIds,
+  type AdaptReport,
   type ArtifactRecord,
   type CatalogResponse,
   type SessionView,
@@ -69,6 +70,9 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   const [pluginName, setPluginName] = useState('')
   const [pluginDescription, setPluginDescription] = useState('')
+  const [adaptSource, setAdaptSource] = useState('')
+  const [adaptName, setAdaptName] = useState('')
+  const [adaptRegister, setAdaptRegister] = useState(true)
 
   const applySession = useCallback((next: SessionView) => {
     setSession(next)
@@ -305,6 +309,71 @@ export function App() {
                     />
                   </div>
                   <Button type="submit">Scaffold</Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle>Adapt</CardTitle>
+                <CardDescription>
+                  Turn a Claude-only skill or plugin into Codex, Cursor, and Agent Plugins files. Existing files stay.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form
+                  className="flex flex-col gap-3"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    void api<AdaptReport>('/api/adapt', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        source: adaptSource,
+                        ...(adaptName ? { name: adaptName } : {}),
+                        register: adaptRegister,
+                      }),
+                    })
+                      .then((report) => {
+                        setAdaptSource('')
+                        setAdaptName('')
+                        setStatus(
+                          report.registered
+                            ? `Adapted ${report.name} and registered it`
+                            : `Adapted ${report.name}` +
+                                (report.wrote.length ? ` · wrote ${report.wrote.length}` : '')
+                        )
+                        return refresh()
+                      })
+                      .catch((err: unknown) => {
+                        setError(err instanceof Error ? err.message : 'Adapt failed')
+                      })
+                  }}
+                >
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="adapt-source">Source</Label>
+                    <Input
+                      id="adapt-source"
+                      required
+                      placeholder="path/to/SKILL.md or a Claude plugin"
+                      value={adaptSource}
+                      onChange={(event) => setAdaptSource(event.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="adapt-name">Name</Label>
+                    <Input
+                      id="adapt-name"
+                      pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+                      placeholder="optional kebab-case override"
+                      value={adaptName}
+                      onChange={(event) => setAdaptName(event.target.value)}
+                    />
+                  </div>
+                  <label className="flex items-center gap-3">
+                    <Switch checked={adaptRegister} onCheckedChange={setAdaptRegister} />
+                    <span className="text-sm">Add to catalogs</span>
+                  </label>
+                  <Button type="submit">Adapt</Button>
                 </form>
               </CardContent>
             </Card>
