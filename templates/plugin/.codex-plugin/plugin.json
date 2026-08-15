@@ -1,0 +1,15 @@
+{
+  "name": "PLUGIN_NAME",
+  "version": "0.1.0",
+  "description": "PLUGIN_DESCRIPTION",
+  "author": {
+    "name": "Ryan Yannelli",
+    "email": "ryanyannelli@gmail.com",
+    "url": "https://github.com/yannelli"
+  },
+  "homepage": "https://github.com/yannelli/skills",
+  "repository": "https://github.com/yannelli/skills",
+  "license": "MIT",
+  "keywords": [],
+  "skills": "./skills/"
+}

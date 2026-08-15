@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "review",
+  "version": "0.1.0",
+  "description": "Concise code review skill. Search and hydrate it instead of preloading.",
+  "author": {
+    "name": "Ryan Yannelli",
+    "email": "ryanyannelli@gmail.com",
+    "url": "https://github.com/yannelli"
+  },
+  "homepage": "https://github.com/yannelli/skills",
+  "repository": "https://github.com/yannelli/skills",
+  "license": "MIT",
+  "keywords": ["review", "example", "scaffold"]
+}

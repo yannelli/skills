@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yard — yannelli-skills</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,620&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="mast">
+      <div class="brand">
+        <span class="word">Yard</span>
+        <span class="mark">yannelli-skills</span>
+      </div>
+      <label class="dyn">
+        <input id="dynamic" type="checkbox" />
+        <span class="dyn-ui" aria-hidden="true"></span>
+        <span class="dyn-copy">
+          <strong>Dynamic</strong>
+          <em>search, then hydrate</em>
+        </span>
+      </label>
+      <div class="mast-meta">
+        <span id="counts">—</span>
+        <button id="reload" type="button">Rescan</button>
+      </div>
+    </header>
+
+    <main class="deck">
+      <section class="rail" aria-label="Session">
+        <h2>On the floor</h2>
+        <p class="lede" id="floor-lede">All artifacts are loaded.</p>
+        <div class="chip-block">
+          <h3>Pinned</h3>
+          <ul id="pinned" class="chips"></ul>
+        </div>
+        <div class="chip-block">
+          <h3>Hydrated</h3>
+          <ul id="hydrated" class="chips"></ul>
+        </div>
+        <div class="chip-block">
+          <h3>Hooks live</h3>
+          <ul id="hooks" class="chips"></ul>
+        </div>
+        <h2>Plugins</h2>
+        <ul id="plugins" class="plugins"></ul>
+        <form id="create" class="create">
+          <h2>New plugin</h2>
+          <label>Name <input name="name" required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" placeholder="my-tool" /></label>
+          <label>Description <input name="description" required placeholder="When to use it" /></label>
+          <button type="submit">Scaffold</button>
+        </form>
+      </section>
+
+      <section class="catalog" aria-label="Catalog">
+        <div class="filters">
+          <input id="q" type="search" placeholder="Search the yard" autofocus />
+          <select id="kind">
+            <option value="">All kinds</option>
+            <option value="skill">Skills</option>
+            <option value="rule">Rules</option>
+            <option value="agent">Agents</option>
+            <option value="command">Commands</option>
+            <option value="hook">Hooks</option>
+          </select>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Id</th>
+              <th>Kind</th>
+              <th>State</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </section>
+
+      <section class="inspect" aria-label="Inspector">
+        <div class="inspect-head">
+          <h2 id="inspect-title">Select an artifact</h2>
+          <p id="inspect-desc" class="lede">Bodies stay on disk until you hydrate them in dynamic mode.</p>
+        </div>
+        <div id="inspect-actions" class="actions" hidden></div>
+        <label class="editor-label" for="editor">Body</label>
+        <textarea id="editor" spellcheck="false" disabled></textarea>
+        <div class="actions">
+          <button id="save" type="button" disabled>Save</button>
+          <span id="status" class="status"></span>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
