@@ -26,6 +26,17 @@ Set `YARD_ROOT` to this repository when Yard is running from a cache copy and th
 
 `hello` and `review` are examples. `review` is meant to be searched, not preloaded.
 
+### Adapt a Claude skill
+
+A Claude-only `SKILL.md` or plugin is missing Codex, Cursor, and Agent Plugins files. The adapter writes only what is absent.
+
+```bash
+npm run adapt -- path/to/SKILL.md
+npm run adapt -- path/to/claude-plugin --name=my-tool --no-register
+```
+
+Or Yard → Adapt, `POST /api/adapt`, or `plugin_adapt`. Claude hooks become Cursor hooks. `.mcp.json` becomes `mcp.json`. The four manifests are filled in. Existing files stay. Catalog registration happens only for a new `plugins/<name>` directory.
+
 ## Author mode
 
 HTTP UI and Streamable HTTP MCP are for working in this repo.

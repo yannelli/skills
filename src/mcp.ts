@@ -1,5 +1,6 @@
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server';
 import * as z from 'zod';
+import { adaptPlugin } from './adapt.js';
 import type { Catalog } from './catalog.js';
 import { indexOf } from './catalog.js';
 import { searchArtifacts } from './search.js';
@@ -164,6 +165,34 @@ export function createYardServer(catalog: Catalog, session: Session): McpServer 
       })
     },
     async ({ name, enabled }) => textResult(await session.setPluginEnabled(name, enabled))
+  );
+
+  server.registerTool(
+    'plugin_adapt',
+    {
+      title: 'Adapt a Claude skill or plugin',
+      description:
+        'Write the missing Codex, Cursor, and Agent Plugins files for a Claude-only skill or plugin. Existing files are left alone. Register only when the destination is plugins/<name>.',
+      inputSchema: z.object({
+        source: z.string().describe('Path to a SKILL.md file or a Claude plugin directory'),
+        name: z.string().optional().describe('Override the kebab-case plugin name'),
+        dest: z.string().optional().describe('Destination plugin directory. Defaults to plugins/<name>.'),
+        register: z
+          .boolean()
+          .optional()
+          .describe('Add marketplace catalog entries. Defaults to true for a new plugins/<name> directory.')
+      })
+    },
+    async ({ source, name, dest, register }) => {
+      const report = await adaptPlugin({
+        source,
+        ...(name ? { name } : {}),
+        ...(dest ? { dest } : {}),
+        ...(register !== undefined ? { register } : {})
+      });
+      catalog.invalidate();
+      return textResult(report);
+    }
   );
 
   server.registerTool(

@@ -1,6 +1,6 @@
 # Add a plugin
 
-1. Copy `templates/plugin` to `plugins/<name>`, or use Yard → New plugin, or `POST /api/plugins`.
+1. Copy `templates/plugin` to `plugins/<name>`, or use Yard → New plugin, or `POST /api/plugins`. To import a Claude-only skill or plugin, use Yard → Adapt, `npm run adapt -- <path>`, or `POST /api/adapt`. The adapter writes the missing Codex, Cursor, and Agent Plugins files and leaves existing ones alone.
 2. Replace `PLUGIN_NAME` / `PLUGIN_DESCRIPTION`. Rename `skills/PLUGIN_NAME`.
 3. Register the same name + `./plugins/<name>` source in all three catalogs:
    - `.claude-plugin/marketplace.json`

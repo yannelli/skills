@@ -40,6 +40,16 @@ export type CatalogResponse = {
   artifacts: ArtifactIndex[];
 };
 
+export type AdaptReport = {
+  ok: boolean;
+  dest: string;
+  name: string;
+  wrote: string[];
+  skipped: string[];
+  notes: string[];
+  registered: boolean;
+};
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body && !headers.has('Content-Type')) {

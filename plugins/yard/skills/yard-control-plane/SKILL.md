@@ -1,6 +1,6 @@
 ---
 name: yard-control-plane
-description: Operate the Yard marketplace control plane. Use when searching skills, hydrating artifacts, toggling dynamic mode, or attaching plugin MCP and hooks.
+description: Operate the Yard marketplace control plane. Use when searching skills, hydrating artifacts, adapting Claude-only plugins, toggling dynamic mode, or attaching plugin MCP and hooks.
 ---
 
 # Yard
@@ -20,7 +20,8 @@ Yard session IDs are not client hook stores or client MCP stores.
 1. `catalog_search` with a short query. Filter `kinds` when you know the type (`skill`, `rule`, `agent`, `command`, `hook`, `mcp`).
 2. `session_hydrate` with the chosen ids. Read the returned bodies.
 3. `session_dehydrate` when the work is done.
-4. `catalog_reload` after files change on disk.
+4. `plugin_adapt` with a path to a Claude-only `SKILL.md` or plugin when Codex, Cursor, or Agent Plugins files are missing. It writes only the absent manifests, hooks, and MCP files.
+5. `catalog_reload` after files change on disk.
 
 ## Roots
 

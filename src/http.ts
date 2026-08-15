@@ -3,6 +3,7 @@ import path from 'node:path';
 import { localhostHostValidation, localhostOriginValidation } from '@modelcontextprotocol/hono';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { Hono } from 'hono';
+import { adaptPlugin } from './adapt.js';
 import { assertInsideRoot, indexOf, type Catalog } from './catalog.js';
 import { createYardServer } from './mcp.js';
 import { PUBLIC_DIR } from './paths.js';
@@ -151,6 +152,21 @@ export function createYardApp(catalog: Catalog, session: Session) {
     const dest = await createPlugin({ name: body.name, description: body.description });
     catalog.invalidate();
     return c.json({ ok: true, path: dest }, 201);
+  });
+
+  app.post('/api/adapt', async (c) => {
+    const body = await c.req.json<{ source?: string; name?: string; dest?: string; register?: boolean }>();
+    if (!body.source) {
+      return c.json({ error: 'source is required' }, 400);
+    }
+    const report = await adaptPlugin({
+      source: body.source,
+      ...(body.name ? { name: body.name } : {}),
+      ...(body.dest ? { dest: body.dest } : {}),
+      ...(typeof body.register === 'boolean' ? { register: body.register } : {})
+    });
+    catalog.invalidate();
+    return c.json({ ok: true, ...report }, 201);
   });
 
   app.post('/api/catalog/reload', async (c) => {

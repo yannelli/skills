@@ -57,43 +57,60 @@ async function replaceInTree(root: string, vars: Record<string, string>): Promis
   await walk(root);
 }
 
-async function addCatalogEntries(name: string, description: string): Promise<void> {
+export async function addCatalogEntries(name: string, description: string): Promise<boolean> {
   const claude = JSON.parse(await readFile(CLAUDE_MARKETPLACE, 'utf8')) as {
     plugins: Array<Record<string, unknown>>;
   };
-  claude.plugins.push({
-    name,
-    source: `./plugins/${name}`,
-    description,
-    version: '0.1.0',
-    author: { name: 'Ryan Yannelli', email: 'ryanyannelli@gmail.com' },
-    category: 'uncategorized',
-    tags: [name],
-    license: 'MIT'
-  });
-  await writeFile(CLAUDE_MARKETPLACE, `${JSON.stringify(claude, null, 2)}\n`);
-
   const codex = JSON.parse(await readFile(CODEX_MARKETPLACE, 'utf8')) as {
     plugins: Array<Record<string, unknown>>;
   };
-  codex.plugins.push({
-    name,
-    source: { source: 'local', path: `./plugins/${name}` },
-    policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' },
-    category: 'Productivity'
-  });
-  await writeFile(CODEX_MARKETPLACE, `${JSON.stringify(codex, null, 2)}\n`);
-
   const cursor = JSON.parse(await readFile(CURSOR_MARKETPLACE, 'utf8')) as {
     plugins: Array<Record<string, unknown>>;
   };
-  cursor.plugins.push({
-    name,
-    source: `./plugins/${name}`,
-    description,
-    version: '0.1.0',
-    category: 'uncategorized',
-    tags: [name]
-  });
-  await writeFile(CURSOR_MARKETPLACE, `${JSON.stringify(cursor, null, 2)}\n`);
+
+  let added = false;
+  if (!hasNamedPlugin(claude.plugins, name)) {
+    claude.plugins.push({
+      name,
+      source: `./plugins/${name}`,
+      description,
+      version: '0.1.0',
+      author: { name: 'Ryan Yannelli', email: 'ryanyannelli@gmail.com' },
+      category: 'uncategorized',
+      tags: [name],
+      license: 'MIT'
+    });
+    await writeFile(CLAUDE_MARKETPLACE, `${JSON.stringify(claude, null, 2)}\n`);
+    added = true;
+  }
+
+  if (!hasNamedPlugin(codex.plugins, name)) {
+    codex.plugins.push({
+      name,
+      source: { source: 'local', path: `./plugins/${name}` },
+      policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' },
+      category: 'Productivity'
+    });
+    await writeFile(CODEX_MARKETPLACE, `${JSON.stringify(codex, null, 2)}\n`);
+    added = true;
+  }
+
+  if (!hasNamedPlugin(cursor.plugins, name)) {
+    cursor.plugins.push({
+      name,
+      source: `./plugins/${name}`,
+      description,
+      version: '0.1.0',
+      category: 'uncategorized',
+      tags: [name]
+    });
+    await writeFile(CURSOR_MARKETPLACE, `${JSON.stringify(cursor, null, 2)}\n`);
+    added = true;
+  }
+
+  return added;
+}
+
+function hasNamedPlugin(plugins: Array<Record<string, unknown>>, name: string): boolean {
+  return plugins.some((plugin) => plugin.name === name);
 }
