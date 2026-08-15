@@ -94,8 +94,7 @@ Mind the difference between `bun run test` and `bun test`: the shipped CLI runs 
 suite runs on node too (`tsx --test`), and `bun run test` keeps it that way. `bun test` — bun's own
 runner — currently fails the CLI subprocess tests because `process.execPath` is bun, not node.
 
-No bun? `npm test` and `npm run validate` work as-is. `build` and `typecheck` delegate to bun for
-the `web/` half; run the halves directly instead: `npm run build:server`, `npm --prefix web run build`,
-`npx tsc --noEmit`, `npm --prefix web run typecheck`.
+No bun? Every script also runs under npm: `npm install && npm --prefix web install`, then
+`npm run <script>`. CI uses the npm path.
 
 The UI lives in `web/`. `bun run build:web` writes `plugins/yard/public`, which is committed.

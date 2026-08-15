@@ -207,9 +207,7 @@ bun run typecheck
 bun run build
 ```
 
-npm still works: `npm install && npm --prefix web install`, then `npm start`, `npm test`, and
-`npm run validate` as before. `build` and `typecheck` hop into `web/` through bun; without bun,
-run the halves directly — `npm run build:server`, `npm --prefix web run build`, `npx tsc --noEmit`,
-`npm --prefix web run typecheck`.
+npm still works for all of it: `npm install && npm --prefix web install`, then the same scripts
+through `npm run`. CI runs exactly that path, so neither runner can rot.
 
 MIT.

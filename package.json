@@ -17,14 +17,14 @@
     "yard": "tsx src/cli.ts",
     "adapt": "tsx src/cli.ts --adapt",
     "sync-mcp": "tsx src/cli.ts --emit-mcp",
-    "build": "bun run build:server && bun run build:web",
+    "build": "npm run build:server && npm run build:web",
     "build:server": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=plugins/yard/dist/cli.js --legal-comments=none --banner:js=\"#!/usr/bin/env node\"",
-    "build:web": "bun run --cwd web build",
-    "dev:web": "bun run --cwd web dev",
+    "build:web": "npm --prefix web run build",
+    "dev:web": "npm --prefix web run dev",
     "validate": "node scripts/validate.mjs",
     "bench": "node scripts/bench.mjs",
     "test": "tsx --test \"src/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit && bun run --cwd web typecheck"
+    "typecheck": "tsc --noEmit && npm --prefix web run typecheck"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.17",
