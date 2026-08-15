@@ -32,7 +32,6 @@ test('hydrating hello activates that plugin’s hooks', async () => {
     await session.setDynamicMode(true);
     const view = await session.hydrate(['hello/skill/hello']);
     assert.ok(view.hooksActive.includes('hello/hook/hooks'));
-    assert.ok(view.hooksActive.includes('hello/hook/claude-hooks'));
     const after = await session.dehydrate(['hello/skill/hello']);
     assert.equal(after.hooksActive.length, 0);
   });

@@ -1,0 +1,1107 @@
+import { execFile } from 'node:child_process';
+import { mkdir, rename } from 'node:fs/promises';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { parseFrontmatter } from '../frontmatter.js';
+import { codexPaths } from './client-paths.js';
+import { isDir, isFile, listDirs, readJsonChecked, readText } from './safe-io.js';
+import type {
+  AgentEntry,
+  CommandEntry,
+  HookEntry,
+  McpEntry,
+  McpTransportKind,
+  MemoryEntry,
+  PluginEntry,
+  ScanWarning,
+  Scope,
+  SkillEntry
+} from './types.js';
+
+/**
+ * Codex keeps its settings in `~/.codex/config.toml`, a file the developer hand
+ * edits. Yard reads it with the parser below and never writes it back — every
+ * mutation is delegated to the `codex` CLI, which owns the formatting.
+ */
+
+const CLIENT = 'codex' as const;
+
+/** Relative to a plugin root, not the repository root. */
+const PLUGIN_MANIFEST = path.join('.codex-plugin', 'plugin.json');
+const MARKETPLACE_MANIFEST = path.join('.agents', 'plugins', 'marketplace.json');
+const DEFAULT_PLUGIN_SKILLS = './skills/';
+const CODEX_CLI_TIMEOUT_MS = 15_000;
+
+export type CodexScan = {
+  installed: boolean;
+  skills: SkillEntry[];
+  plugins: PluginEntry[];
+  mcpServers: McpEntry[];
+  hooks: HookEntry[];
+  agents: AgentEntry[];
+  commands: CommandEntry[];
+  memory: MemoryEntry[];
+  warnings: ScanWarning[];
+};
+
+export async function scanCodex(projectRoot: string): Promise<CodexScan> {
+  const paths = codexPaths(projectRoot);
+  const warnings: ScanWarning[] = [];
+  const warn = (file: string, message: string): void => {
+    warnings.push({ client: CLIENT, file, message });
+  };
+
+  const installed = await isDir(paths.dir);
+  const skills: SkillEntry[] = [];
+  const mcpServers: McpEntry[] = [];
+  const hooks: HookEntry[] = [];
+  const memory: MemoryEntry[] = [];
+
+  const config = await readConfig(paths.config, warn);
+  mcpServers.push(...configMcpServers(config, paths.config, warn));
+
+  hooks.push(...(await readHookFile(paths.hooks, 'user', undefined, warn)));
+
+  skills.push(...(await readSkillTree(paths.userSkills, 'user', 'on', undefined, warn)));
+  skills.push(
+    ...(await readSkillTree(paths.userSkillsDisabled, 'user', 'off', paths.userSkillsDisabled, warn))
+  );
+
+  const plugins = await scanPlugins(paths.pluginCacheDir, { skills, mcpServers, hooks }, warn);
+
+  for (const [scope, file] of [
+    ['user', paths.userMemory],
+    ['project', paths.projectMemory]
+  ] as const) {
+    const entry = await readMemory(file, scope);
+    if (entry) {
+      memory.push(entry);
+    }
+  }
+
+  return {
+    installed,
+    skills,
+    plugins,
+    mcpServers,
+    hooks,
+    // Codex has no user-level agent or command directories: subagents ship
+    // inside plugins as skills, and prompts are not a scannable surface.
+    agents: [],
+    commands: [],
+    memory,
+    warnings
+  };
+}
+
+type Warn = (file: string, message: string) => void;
+
+async function readConfig(file: string, warn: Warn): Promise<Record<string, unknown>> {
+  const raw = await readText(file);
+  if (raw === undefined) {
+    return {};
+  }
+  try {
+    return parseToml(raw);
+  } catch (error) {
+    warn(file, `could not parse TOML: ${error instanceof Error ? error.message : String(error)}`);
+    return {};
+  }
+}
+
+function configMcpServers(
+  config: Record<string, unknown>,
+  file: string,
+  warn: Warn
+): McpEntry[] {
+  const servers = asTable(config['mcp_servers']);
+  if (!servers) {
+    return [];
+  }
+  const entries: McpEntry[] = [];
+  for (const [name, value] of Object.entries(servers)) {
+    const table = asTable(value);
+    if (!table) {
+      warn(file, `mcp_servers.${name} is not a table`);
+      continue;
+    }
+    const headers = asStringRecord(table['http_headers']);
+    entries.push(
+      mcpEntry({
+        id: `${CLIENT}:user:${name}`,
+        scope: 'user',
+        name,
+        file,
+        table,
+        ...(headers ? { headers } : {})
+      })
+    );
+  }
+  return entries;
+}
+
+type McpSource = {
+  id: string;
+  scope: Scope;
+  name: string;
+  file: string;
+  table: Record<string, unknown>;
+  headers?: Record<string, string>;
+  plugin?: string;
+};
+
+function mcpEntry(source: McpSource): McpEntry {
+  const { table } = source;
+  const url = asString(table['url']);
+  const command = asString(table['command']);
+  const args = asStringArray(table['args']);
+  const env = asStringRecord(table['env']);
+  const cwd = asString(table['cwd']);
+  const headers = source.headers ?? asStringRecord(table['headers']);
+  const enabled = asBoolean(table['enabled']);
+
+  return {
+    id: source.id,
+    client: CLIENT,
+    scope: source.scope,
+    name: source.name,
+    transport: transportOf(asString(table['type']), url),
+    ...(command !== undefined ? { command } : {}),
+    ...(args ? { args } : {}),
+    ...(env ? { env } : {}),
+    ...(cwd !== undefined ? { cwd } : {}),
+    ...(url !== undefined ? { url } : {}),
+    ...(headers ? { headers } : {}),
+    file: source.file,
+    ...(source.plugin !== undefined ? { plugin: source.plugin } : {}),
+    enabled: enabled ?? true,
+    ...(enabled === undefined ? {} : { enabledSource: source.file })
+  };
+}
+
+function transportOf(declared: string | undefined, url: string | undefined): McpTransportKind {
+  if (declared === 'stdio' || declared === 'http' || declared === 'sse' || declared === 'ws') {
+    return declared;
+  }
+  return url === undefined ? 'stdio' : 'http';
+}
+
+type HookFile = {
+  hooks?: Record<string, unknown>;
+};
+
+/**
+ * Codex reuses Claude's hooks.json shape with PascalCase event names, plus an
+ * optional `commandWindows` sibling of `command`. Yard never rewrites this
+ * file, so that key survives on disk even though HookEntry cannot carry it.
+ */
+async function readHookFile(
+  file: string,
+  scope: Scope,
+  plugin: string | undefined,
+  warn: Warn
+): Promise<HookEntry[]> {
+  const read = await readJsonChecked<HookFile>(file);
+  if (read.missing) {
+    return [];
+  }
+  if (read.error !== undefined || !read.value) {
+    warn(file, `could not parse JSON: ${read.error ?? 'empty file'}`);
+    return [];
+  }
+  const events = asTable(read.value.hooks);
+  if (!events) {
+    warn(file, 'no "hooks" object');
+    return [];
+  }
+
+  const entries: HookEntry[] = [];
+  for (const [event, groups] of Object.entries(events)) {
+    if (!Array.isArray(groups)) {
+      warn(file, `hooks.${event} is not an array`);
+      continue;
+    }
+    let index = 0;
+    for (const group of groups) {
+      const groupTable = asTable(group);
+      const matcher = asString(groupTable?.['matcher']);
+      const list = groupTable?.['hooks'];
+      if (!Array.isArray(list)) {
+        warn(file, `hooks.${event} entry has no "hooks" array`);
+        continue;
+      }
+      for (const hook of list) {
+        const table = asTable(hook);
+        const command = asString(table?.['command']);
+        if (!table || command === undefined) {
+          warn(file, `hooks.${event}[${index}] has no command`);
+          index += 1;
+          continue;
+        }
+        const type = table['type'] === 'prompt' ? 'prompt' : 'command';
+        const timeout = asNumber(table['timeout']);
+        entries.push({
+          id: `${CLIENT}:${scope}:${plugin ? `${plugin}:` : ''}${event}:${index}`,
+          client: CLIENT,
+          scope,
+          event,
+          ...(matcher !== undefined ? { matcher } : {}),
+          type,
+          command,
+          ...(timeout !== undefined ? { timeout } : {}),
+          file,
+          ...(plugin !== undefined ? { plugin } : {}),
+          enabled: true,
+          index
+        });
+        index += 1;
+      }
+    }
+  }
+  return entries;
+}
+
+type SkillOptions = {
+  scope: Scope;
+  visibility: SkillEntry['visibility'];
+  visibilitySource?: string;
+  plugin?: string;
+};
+
+async function readSkillTree(
+  root: string,
+  scope: Scope,
+  visibility: SkillEntry['visibility'],
+  visibilitySource: string | undefined,
+  warn: Warn,
+  plugin?: string
+): Promise<SkillEntry[]> {
+  const entries: SkillEntry[] = [];
+  for (const name of await listDirs(root)) {
+    const entry = await readSkill(path.join(root, name), name, warn, {
+      scope,
+      visibility,
+      ...(visibilitySource !== undefined ? { visibilitySource } : {}),
+      ...(plugin !== undefined ? { plugin } : {})
+    });
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+  return entries;
+}
+
+async function readSkill(
+  dir: string,
+  name: string,
+  warn: Warn,
+  options: SkillOptions
+): Promise<SkillEntry | undefined> {
+  const file = path.join(dir, 'SKILL.md');
+  const raw = await readText(file);
+  if (raw === undefined) {
+    warn(file, 'skill directory has no readable SKILL.md');
+    return undefined;
+  }
+  const { data } = parseFrontmatter(raw);
+  const qualifiedName = options.plugin ? `${options.plugin}:${name}` : name;
+  return {
+    id: `${CLIENT}:${options.scope}:${qualifiedName}`,
+    client: CLIENT,
+    scope: options.scope,
+    name,
+    qualifiedName,
+    description: data['description'] ?? '',
+    file,
+    dir,
+    ...(options.plugin !== undefined ? { plugin: options.plugin } : {}),
+    visibility: options.visibility,
+    ...(options.visibilitySource !== undefined
+      ? { visibilitySource: options.visibilitySource }
+      : {}),
+    frontmatter: data,
+    bytes: Buffer.byteLength(raw, 'utf8')
+  };
+}
+
+async function readMemory(file: string, scope: Scope): Promise<MemoryEntry | undefined> {
+  const raw = await readText(file);
+  if (raw === undefined) {
+    return undefined;
+  }
+  return {
+    id: `${CLIENT}:${scope}:${path.basename(file)}`,
+    client: CLIENT,
+    scope,
+    name: path.basename(file),
+    file,
+    bytes: Buffer.byteLength(raw, 'utf8')
+  };
+}
+
+type PluginManifest = {
+  name?: unknown;
+  version?: unknown;
+  description?: unknown;
+  skills?: unknown;
+  hooks?: unknown;
+  mcpServers?: unknown;
+};
+
+type MarketplaceFile = {
+  name?: unknown;
+  plugins?: unknown;
+};
+
+type Collected = {
+  skills: SkillEntry[];
+  mcpServers: McpEntry[];
+  hooks: HookEntry[];
+};
+
+async function scanPlugins(
+  cacheDir: string,
+  collected: Collected,
+  warn: Warn
+): Promise<PluginEntry[]> {
+  const plugins: PluginEntry[] = [];
+  for (const marketplace of await listDirs(cacheDir)) {
+    const marketplaceDir = path.join(cacheDir, marketplace);
+    const installed = new Set<string>();
+
+    for (const name of await listDirs(marketplaceDir)) {
+      const root = await resolvePluginRoot(path.join(marketplaceDir, name));
+      if (!root) {
+        continue;
+      }
+      installed.add(name);
+      plugins.push(await readPlugin(root, name, marketplace, collected, warn));
+    }
+
+    plugins.push(...(await declaredPlugins(marketplaceDir, marketplace, installed, warn)));
+  }
+  return plugins;
+}
+
+/**
+ * Remote installs nest the payload one level deeper, under a version
+ * directory, so the manifest is at either `<plugin>/` or `<plugin>/<version>/`.
+ */
+async function resolvePluginRoot(dir: string): Promise<string | undefined> {
+  if (await isFile(path.join(dir, PLUGIN_MANIFEST))) {
+    return dir;
+  }
+  const versions = await listDirs(dir);
+  for (const version of [...versions].reverse()) {
+    const candidate = path.join(dir, version);
+    if (await isFile(path.join(candidate, PLUGIN_MANIFEST))) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+async function readPlugin(
+  root: string,
+  dirName: string,
+  marketplace: string,
+  collected: Collected,
+  warn: Warn
+): Promise<PluginEntry> {
+  const manifestFile = path.join(root, PLUGIN_MANIFEST);
+  const read = await readJsonChecked<PluginManifest>(manifestFile);
+  if (read.error !== undefined) {
+    warn(manifestFile, `could not parse JSON: ${read.error}`);
+  }
+  const manifest = read.value ?? {};
+  const name = asString(manifest.name) ?? dirName;
+
+  const skills = await readSkillTree(
+    path.resolve(root, asString(manifest.skills) ?? DEFAULT_PLUGIN_SKILLS),
+    'plugin',
+    'on',
+    undefined,
+    warn,
+    name
+  );
+  const mcpServers = await pluginMcpServers(root, manifest, name, warn);
+  const hooks = await pluginHooks(root, manifest, name, warn);
+
+  collected.skills.push(...skills);
+  collected.mcpServers.push(...mcpServers);
+  collected.hooks.push(...hooks);
+
+  return {
+    id: `${CLIENT}:plugin:${name}`,
+    client: CLIENT,
+    scope: 'plugin',
+    name,
+    marketplace,
+    qualifiedName: name,
+    description: asString(manifest.description) ?? '',
+    version: asString(manifest.version) ?? path.basename(root),
+    root,
+    enabled: true,
+    installed: true,
+    skills: skills.length,
+    hooks: hooks.length,
+    mcpServers: mcpServers.length
+  };
+}
+
+/** `mcpServers` is normally a path to a sibling `.mcp.json`, but may be inline. */
+async function pluginMcpServers(
+  root: string,
+  manifest: PluginManifest,
+  plugin: string,
+  warn: Warn
+): Promise<McpEntry[]> {
+  const resolved = await resolveManifestRef<{ mcpServers?: unknown }>(
+    root,
+    manifest.mcpServers,
+    warn
+  );
+  if (!resolved) {
+    return [];
+  }
+  const servers = asTable(resolved.value['mcpServers'] ?? resolved.value);
+  if (!servers) {
+    warn(resolved.file, 'no "mcpServers" object');
+    return [];
+  }
+  const entries: McpEntry[] = [];
+  for (const [name, value] of Object.entries(servers)) {
+    const table = asTable(value);
+    if (!table) {
+      warn(resolved.file, `mcpServers.${name} is not an object`);
+      continue;
+    }
+    entries.push(
+      mcpEntry({
+        id: `${CLIENT}:plugin:${plugin}:${name}`,
+        scope: 'plugin',
+        name,
+        file: resolved.file,
+        table,
+        plugin
+      })
+    );
+  }
+  return entries;
+}
+
+/**
+ * No plugin observed on disk ships hooks, so both spellings are accepted: a
+ * `hooks` manifest reference, or a hooks.json at the plugin root.
+ */
+async function pluginHooks(
+  root: string,
+  manifest: PluginManifest,
+  plugin: string,
+  warn: Warn
+): Promise<HookEntry[]> {
+  const ref = asString(manifest.hooks);
+  const file = path.resolve(root, ref ?? 'hooks.json');
+  if (isTable(manifest.hooks)) {
+    warn(path.join(root, PLUGIN_MANIFEST), 'inline "hooks" object is not supported; use a path');
+    return [];
+  }
+  return readHookFile(file, 'plugin', plugin, warn);
+}
+
+type ManifestRef<T> = { file: string; value: T };
+
+async function resolveManifestRef<T extends object>(
+  root: string,
+  ref: unknown,
+  warn: Warn
+): Promise<ManifestRef<T> | undefined> {
+  if (isTable(ref)) {
+    return { file: path.join(root, PLUGIN_MANIFEST), value: ref as T };
+  }
+  const relative = asString(ref);
+  if (relative === undefined) {
+    return undefined;
+  }
+  const file = path.resolve(root, relative);
+  const read = await readJsonChecked<T>(file);
+  if (read.missing) {
+    warn(file, 'referenced by the plugin manifest but missing');
+    return undefined;
+  }
+  if (read.error !== undefined || !read.value) {
+    warn(file, `could not parse JSON: ${read.error ?? 'empty file'}`);
+    return undefined;
+  }
+  return { file, value: read.value };
+}
+
+/** Plugins a marketplace offers but that are not in the cache yet. */
+async function declaredPlugins(
+  marketplaceDir: string,
+  marketplace: string,
+  installed: Set<string>,
+  warn: Warn
+): Promise<PluginEntry[]> {
+  const file = path.join(marketplaceDir, MARKETPLACE_MANIFEST);
+  const read = await readJsonChecked<MarketplaceFile>(file);
+  if (read.missing) {
+    return [];
+  }
+  if (read.error !== undefined || !read.value) {
+    warn(file, `could not parse JSON: ${read.error ?? 'empty file'}`);
+    return [];
+  }
+  const listed = read.value.plugins;
+  if (!Array.isArray(listed)) {
+    warn(file, 'no "plugins" array');
+    return [];
+  }
+
+  const entries: PluginEntry[] = [];
+  for (const item of listed) {
+    const name = asString(asTable(item)?.['name']);
+    if (name === undefined || installed.has(name)) {
+      continue;
+    }
+    entries.push({
+      id: `${CLIENT}:plugin:${name}`,
+      client: CLIENT,
+      scope: 'plugin',
+      name,
+      marketplace,
+      qualifiedName: name,
+      description: asString(asTable(item)?.['description']) ?? '',
+      version: '',
+      enabled: false,
+      enabledSource: file,
+      installed: false,
+      skills: 0,
+      hooks: 0,
+      mcpServers: 0
+    });
+  }
+  return entries;
+}
+
+/**
+ * Codex disables a skill the same way Claude does: by moving its directory to
+ * `skills.disabled`. `moved` reports an actual rename, so it is false on a dry
+ * run and when the skill is already where it was asked to be.
+ */
+export async function setSkillDirectoryEnabled(opts: {
+  skill: string;
+  enabled: boolean;
+  dryRun?: boolean;
+}): Promise<{ from: string; to: string; moved: boolean }> {
+  const paths = codexPaths(process.cwd());
+  const enabledDir = path.join(paths.userSkills, opts.skill);
+  const disabledDir = path.join(paths.userSkillsDisabled, opts.skill);
+  const from = opts.enabled ? disabledDir : enabledDir;
+  const to = opts.enabled ? enabledDir : disabledDir;
+
+  if (opts.dryRun || !(await isDir(from)) || (await isDir(to))) {
+    return { from, to, moved: false };
+  }
+
+  await mkdir(path.dirname(to), { recursive: true });
+  await rename(from, to);
+  return { from, to, moved: true };
+}
+
+export type CodexCliOptions = {
+  dryRun?: boolean;
+  timeoutMs?: number;
+};
+
+export type AddMcpServerOptions = CodexCliOptions & {
+  name: string;
+  /** stdio servers. Mutually exclusive with `url`. */
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  /** Streamable HTTP servers. Mutually exclusive with `command`. */
+  url?: string;
+  bearerTokenEnvVar?: string;
+};
+
+export type CodexCliResult = {
+  /** The argv handed to the `codex` binary, so a dry run can be shown. */
+  argv: string[];
+  ran: boolean;
+  stdout: string;
+  stderr: string;
+};
+
+/**
+ * Verified against codex-cli 0.147.0:
+ *   codex mcp add [--env K=V]... [--bearer-token-env-var VAR] <NAME> (--url <URL> | -- <CMD>...)
+ */
+export async function addMcpServer(options: AddMcpServerOptions): Promise<CodexCliResult> {
+  const hasCommand = options.command !== undefined && options.command !== '';
+  const hasUrl = options.url !== undefined && options.url !== '';
+  if (hasCommand === hasUrl) {
+    throw new Error(`addMcpServer(${options.name}): pass exactly one of command or url`);
+  }
+
+  const argv = ['mcp', 'add', options.name];
+  for (const [key, value] of Object.entries(options.env ?? {})) {
+    argv.push('--env', `${key}=${value}`);
+  }
+  if (options.bearerTokenEnvVar !== undefined) {
+    argv.push('--bearer-token-env-var', options.bearerTokenEnvVar);
+  }
+  if (hasUrl) {
+    argv.push('--url', options.url as string);
+  } else {
+    argv.push('--', options.command as string, ...(options.args ?? []));
+  }
+  return runCodex(argv, options);
+}
+
+export async function removeMcpServer(
+  name: string,
+  options: CodexCliOptions = {}
+): Promise<CodexCliResult> {
+  return runCodex(['mcp', 'remove', name], options);
+}
+
+const execFileAsync = promisify(execFile);
+
+async function runCodex(argv: string[], options: CodexCliOptions): Promise<CodexCliResult> {
+  if (options.dryRun) {
+    return { argv, ran: false, stdout: '', stderr: '' };
+  }
+  const bin = process.env.YARD_CODEX_BIN ?? 'codex';
+  try {
+    const { stdout, stderr } = await execFileAsync(bin, argv, {
+      timeout: options.timeoutMs ?? CODEX_CLI_TIMEOUT_MS,
+      encoding: 'utf8'
+    });
+    return { argv, ran: true, stdout, stderr };
+  } catch (error) {
+    const config = codexPaths(process.cwd()).config;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(
+        `the \`${bin}\` CLI is not installed or not on PATH, so \`codex ${argv.join(' ')}\` could not run. Edit ${config} by hand instead.`
+      );
+    }
+    const stderr = typeof (error as { stderr?: unknown }).stderr === 'string'
+      ? (error as { stderr: string }).stderr.trim()
+      : '';
+    throw new Error(
+      `\`${bin} ${argv.join(' ')}\` failed${stderr ? `: ${stderr}` : ''}. ${config} was left unchanged.`
+    );
+  }
+}
+
+/**
+ * A deliberately small TOML reader: enough for config.toml, and nothing that
+ * would tempt anyone to serialise a document back out.
+ *
+ * Supports tables, array-of-tables, dotted and quoted keys, basic/literal
+ * strings (including their multi-line forms), integers, floats, booleans,
+ * arrays, inline tables, comments and blank lines. Values it does not model —
+ * offset dates, for instance — come back as their raw text.
+ */
+export function parseToml(raw: string): Record<string, unknown> {
+  const root: Record<string, unknown> = {};
+  let current = root;
+  const lines = raw.split(/\r?\n/);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = (lines[i] ?? '').trim();
+    if (line === '' || line.startsWith('#')) {
+      continue;
+    }
+    try {
+      if (line.startsWith('[')) {
+        current = openTable(root, line);
+        continue;
+      }
+      let buffer = line;
+      for (;;) {
+        try {
+          const { keys, value } = parseAssignment(buffer);
+          assign(current, keys, value);
+          break;
+        } catch (error) {
+          const next = lines[i + 1];
+          if (!(error instanceof IncompleteValue) || next === undefined) {
+            throw error;
+          }
+          i += 1;
+          buffer = `${buffer}\n${next}`;
+        }
+      }
+    } catch (error) {
+      throw new Error(`line ${i + 1}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return root;
+}
+
+type Cursor = { text: string; pos: number };
+
+/** Signals that a value needs the next line before it can be parsed. */
+class IncompleteValue extends Error {}
+
+function openTable(root: Record<string, unknown>, line: string): Record<string, unknown> {
+  const cursor: Cursor = { text: line, pos: 1 };
+  const isArrayTable = line[1] === '[';
+  if (isArrayTable) {
+    cursor.pos += 1;
+  }
+  const keys = parseKeyPath(cursor);
+  skipTrivia(cursor);
+  const close = isArrayTable ? ']]' : ']';
+  if (!cursor.text.startsWith(close, cursor.pos)) {
+    throw new Error('unterminated table header');
+  }
+  cursor.pos += close.length;
+  skipTrivia(cursor);
+  if (cursor.pos < cursor.text.length) {
+    throw new Error(`unexpected text after table header: ${cursor.text.slice(cursor.pos)}`);
+  }
+  return isArrayTable ? appendTable(root, keys) : ensureTable(root, keys);
+}
+
+function parseAssignment(text: string): { keys: string[]; value: unknown } {
+  const cursor: Cursor = { text, pos: 0 };
+  const keys = parseKeyPath(cursor);
+  skipTrivia(cursor);
+  if (cursor.text[cursor.pos] !== '=') {
+    throw new Error('expected "=" after key');
+  }
+  cursor.pos += 1;
+  const value = parseValue(cursor);
+  skipTrivia(cursor);
+  if (cursor.pos < cursor.text.length) {
+    throw new Error(`unexpected text after value: ${cursor.text.slice(cursor.pos)}`);
+  }
+  return { keys, value };
+}
+
+function skipTrivia(cursor: Cursor): void {
+  while (cursor.pos < cursor.text.length) {
+    const char = cursor.text[cursor.pos] as string;
+    if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
+      cursor.pos += 1;
+      continue;
+    }
+    if (char === '#') {
+      while (cursor.pos < cursor.text.length && cursor.text[cursor.pos] !== '\n') {
+        cursor.pos += 1;
+      }
+      continue;
+    }
+    break;
+  }
+}
+
+const BARE_KEY = /[A-Za-z0-9_-]/;
+
+function parseKeyPath(cursor: Cursor): string[] {
+  const keys: string[] = [];
+  for (;;) {
+    skipTrivia(cursor);
+    const char = cursor.text[cursor.pos];
+    if (char === '"' || char === "'") {
+      keys.push(parseString(cursor));
+    } else {
+      const start = cursor.pos;
+      while (cursor.pos < cursor.text.length && BARE_KEY.test(cursor.text[cursor.pos] as string)) {
+        cursor.pos += 1;
+      }
+      if (cursor.pos === start) {
+        throw new Error('expected a key');
+      }
+      keys.push(cursor.text.slice(start, cursor.pos));
+    }
+    skipTrivia(cursor);
+    if (cursor.text[cursor.pos] !== '.') {
+      return keys;
+    }
+    cursor.pos += 1;
+  }
+}
+
+function parseValue(cursor: Cursor): unknown {
+  skipTrivia(cursor);
+  if (cursor.pos >= cursor.text.length) {
+    throw new Error('expected a value');
+  }
+  const char = cursor.text[cursor.pos] as string;
+  if (char === '"' || char === "'") {
+    return parseString(cursor);
+  }
+  if (char === '[') {
+    return parseArray(cursor);
+  }
+  if (char === '{') {
+    return parseInlineTable(cursor);
+  }
+  return parseScalar(cursor);
+}
+
+function parseString(cursor: Cursor): string {
+  const quote = cursor.text[cursor.pos] as string;
+  const triple = cursor.text.startsWith(quote.repeat(3), cursor.pos);
+  const delimiter = triple ? quote.repeat(3) : quote;
+  const literal = quote === "'";
+  cursor.pos += delimiter.length;
+  if (triple && cursor.text[cursor.pos] === '\n') {
+    cursor.pos += 1;
+  }
+
+  let out = '';
+  for (;;) {
+    if (cursor.pos >= cursor.text.length) {
+      if (triple) {
+        throw new IncompleteValue('unterminated multi-line string');
+      }
+      throw new Error('unterminated string');
+    }
+    if (cursor.text.startsWith(delimiter, cursor.pos)) {
+      cursor.pos += delimiter.length;
+      return out;
+    }
+    const char = cursor.text[cursor.pos] as string;
+    if (!triple && (char === '\n' || char === '\r')) {
+      throw new Error('unterminated string');
+    }
+    if (!literal && char === '\\') {
+      out += readEscape(cursor, triple);
+      continue;
+    }
+    out += char;
+    cursor.pos += 1;
+  }
+}
+
+const SIMPLE_ESCAPES: Record<string, string> = {
+  b: '\b',
+  t: '\t',
+  n: '\n',
+  f: '\f',
+  r: '\r',
+  '"': '"',
+  '\\': '\\'
+};
+
+function readEscape(cursor: Cursor, triple: boolean): string {
+  cursor.pos += 1;
+  const char = cursor.text[cursor.pos];
+  if (char === undefined) {
+    throw new Error('unterminated escape');
+  }
+  const simple = SIMPLE_ESCAPES[char];
+  if (simple !== undefined) {
+    cursor.pos += 1;
+    return simple;
+  }
+  if (char === 'u' || char === 'U') {
+    const width = char === 'u' ? 4 : 8;
+    const digits = cursor.text.slice(cursor.pos + 1, cursor.pos + 1 + width);
+    if (!new RegExp(`^[0-9a-fA-F]{${width}}$`).test(digits)) {
+      throw new Error(`bad \\${char} escape`);
+    }
+    cursor.pos += 1 + width;
+    return String.fromCodePoint(Number.parseInt(digits, 16));
+  }
+  // A backslash at the end of a line inside a multi-line string swallows the
+  // newline and the indentation that follows it.
+  if (triple && /\s/.test(char)) {
+    while (cursor.pos < cursor.text.length && /\s/.test(cursor.text[cursor.pos] as string)) {
+      cursor.pos += 1;
+    }
+    return '';
+  }
+  throw new Error(`unknown escape: \\${char}`);
+}
+
+function parseArray(cursor: Cursor): unknown[] {
+  cursor.pos += 1;
+  const items: unknown[] = [];
+  for (;;) {
+    skipTrivia(cursor);
+    if (cursor.pos >= cursor.text.length) {
+      throw new IncompleteValue('unterminated array');
+    }
+    if (cursor.text[cursor.pos] === ']') {
+      cursor.pos += 1;
+      return items;
+    }
+    items.push(parseValue(cursor));
+    skipTrivia(cursor);
+    if (cursor.pos >= cursor.text.length) {
+      throw new IncompleteValue('unterminated array');
+    }
+    const char = cursor.text[cursor.pos];
+    if (char === ',') {
+      cursor.pos += 1;
+      continue;
+    }
+    if (char === ']') {
+      cursor.pos += 1;
+      return items;
+    }
+    throw new Error(`expected "," or "]" in array, got ${String(char)}`);
+  }
+}
+
+function parseInlineTable(cursor: Cursor): Record<string, unknown> {
+  cursor.pos += 1;
+  const table: Record<string, unknown> = {};
+  for (;;) {
+    skipTrivia(cursor);
+    if (cursor.pos >= cursor.text.length) {
+      throw new IncompleteValue('unterminated inline table');
+    }
+    if (cursor.text[cursor.pos] === '}') {
+      cursor.pos += 1;
+      return table;
+    }
+    const keys = parseKeyPath(cursor);
+    skipTrivia(cursor);
+    if (cursor.text[cursor.pos] !== '=') {
+      throw new Error('expected "=" in inline table');
+    }
+    cursor.pos += 1;
+    assign(table, keys, parseValue(cursor));
+    skipTrivia(cursor);
+    if (cursor.text[cursor.pos] === ',') {
+      cursor.pos += 1;
+    }
+  }
+}
+
+const INTEGER = /^[+-]?[0-9](?:[0-9_]*[0-9])?$/;
+const RADIX_INTEGER = /^0(x[0-9a-fA-F_]+|o[0-7_]+|b[01_]+)$/;
+const FLOAT = /^[+-]?[0-9](?:[0-9_]*[0-9])?(?:\.[0-9](?:[0-9_]*[0-9])?)?(?:[eE][+-]?[0-9_]+)?$/;
+
+function parseScalar(cursor: Cursor): unknown {
+  const start = cursor.pos;
+  while (cursor.pos < cursor.text.length && !',]}#\n\r'.includes(cursor.text[cursor.pos] as string)) {
+    cursor.pos += 1;
+  }
+  const token = cursor.text.slice(start, cursor.pos).trim();
+  // Put the trailing whitespace back so callers report the right position.
+  cursor.pos = start + cursor.text.slice(start, cursor.pos).trimEnd().length;
+
+  if (token === '') {
+    throw new Error('expected a value');
+  }
+  if (token === 'true' || token === 'false') {
+    return token === 'true';
+  }
+  const digits = token.replace(/_/g, '');
+  if (RADIX_INTEGER.test(token)) {
+    const radix = token[1] === 'x' ? 16 : token[1] === 'o' ? 8 : 2;
+    return Number.parseInt(digits.slice(2), radix);
+  }
+  if (INTEGER.test(token) || FLOAT.test(token)) {
+    return Number(digits);
+  }
+  if (/^[+-]?inf$/.test(token)) {
+    return token.startsWith('-') ? -Infinity : Infinity;
+  }
+  if (/^[+-]?nan$/.test(token)) {
+    return NaN;
+  }
+  return token;
+}
+
+function ensureTable(root: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  let node = root;
+  for (const key of keys) {
+    const existing = node[key];
+    if (existing === undefined) {
+      const created: Record<string, unknown> = {};
+      node[key] = created;
+      node = created;
+      continue;
+    }
+    if (Array.isArray(existing)) {
+      const last = existing[existing.length - 1];
+      if (!isTable(last)) {
+        throw new Error(`cannot descend into ${key}`);
+      }
+      node = last;
+      continue;
+    }
+    if (!isTable(existing)) {
+      throw new Error(`cannot redefine ${key} as a table`);
+    }
+    node = existing;
+  }
+  return node;
+}
+
+function appendTable(root: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const last = keys[keys.length - 1];
+  if (last === undefined) {
+    throw new Error('empty table header');
+  }
+  const parent = ensureTable(root, keys.slice(0, -1));
+  const existing = parent[last];
+  const list = Array.isArray(existing) ? existing : [];
+  if (existing !== undefined && !Array.isArray(existing)) {
+    throw new Error(`cannot redefine ${last} as an array of tables`);
+  }
+  const created: Record<string, unknown> = {};
+  list.push(created);
+  parent[last] = list;
+  return created;
+}
+
+function assign(table: Record<string, unknown>, keys: string[], value: unknown): void {
+  const last = keys[keys.length - 1];
+  if (last === undefined) {
+    throw new Error('empty key');
+  }
+  ensureTable(table, keys.slice(0, -1))[last] = value;
+}
+
+function isTable(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asTable(value: unknown): Record<string, unknown> | undefined {
+  return isTable(value) ? value : undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const out = value.filter((item): item is string => typeof item === 'string');
+  return out.length === value.length ? out : undefined;
+}
+
+function asStringRecord(value: unknown): Record<string, string> | undefined {
+  const table = asTable(value);
+  if (!table) {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, item] of Object.entries(table)) {
+    if (typeof item === 'string') {
+      out[key] = item;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}

@@ -10,7 +10,10 @@
   "homepage": "https://github.com/yannelli/skills",
   "repository": "https://github.com/yannelli/skills",
   "license": "MIT",
-  "keywords": ["hello", "example", "scaffold"],
-  "skills": "./skills/",
-  "hooks": "./hooks/claude-hooks.json"
+  "keywords": [
+    "hello",
+    "example",
+    "scaffold"
+  ],
+  "skills": "./skills/"
 }

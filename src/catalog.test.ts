@@ -11,7 +11,6 @@ test('indexes hello and review from the marketplace', async () => {
   assert.ok(snap.artifacts.some((item) => item.id === 'review/skill/review'));
   assert.ok(snap.artifacts.some((item) => item.id === 'hello/rule/concise-replies'));
   assert.ok(snap.artifacts.some((item) => item.id === 'hello/hook/hooks'));
-  assert.ok(snap.artifacts.some((item) => item.id === 'hello/hook/claude-hooks'));
   assert.ok(snap.artifacts.some((item) => item.id === 'yard/skill/yard-control-plane'));
   assert.ok(snap.artifacts.some((item) => item.id === 'yard/mcp/yard'));
 });

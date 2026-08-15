@@ -10,13 +10,12 @@
   "homepage": "https://github.com/yannelli/skills",
   "repository": "https://github.com/yannelli/skills",
   "license": "MIT",
-  "keywords": ["yard", "mcp", "catalog", "hydrate"],
+  "keywords": [
+    "yard",
+    "mcp",
+    "catalog",
+    "hydrate"
+  ],
   "skills": "./skills/",
-  "mcpServers": {
-    "yard": {
-      "command": "node",
-      "args": ["./dist/cli.js", "--stdio"],
-      "cwd": "."
-    }
-  }
+  "mcpServers": "./.mcp.json"
 }

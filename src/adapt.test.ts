@@ -12,6 +12,7 @@ import {
   kebabName
 } from './adapt.js';
 import { AGENT_MCP_SCHEMA } from './mcp-spec.js';
+import { exists } from './env/safe-io.js';
 import { Catalog } from './catalog.js';
 import { createYardApp } from './http.js';
 import { Session } from './session.js';
@@ -31,10 +32,23 @@ test('kebabName collapses titles', () => {
   assert.equal(kebabName('My Claude Skill'), 'my-claude-skill');
 });
 
-test('Claude hooks become Cursor hooks', () => {
+test('Claude hooks become user-level Cursor hooks', () => {
   assert.deepEqual(claudeHooksToCursor(CLAUDE_HOOKS), {
-    hooks: { sessionStart: [{ command: './scripts/hello.sh' }] }
+    version: 1,
+    hooks: { sessionStart: [{ command: './scripts/hello.sh' }] },
+    dropped: []
   });
+});
+
+test('Claude events with no Cursor counterpart are reported, not invented', () => {
+  const converted = claudeHooksToCursor({
+    hooks: {
+      Notification: [{ hooks: [{ type: 'command', command: './notify.sh' }] }],
+      PermissionRequest: [{ hooks: [{ type: 'command', command: './ask.sh' }] }]
+    }
+  });
+  assert.deepEqual(converted.hooks, {});
+  assert.deepEqual(converted.dropped.sort(), ['Notification', 'PermissionRequest']);
 });
 
 test('Cursor hooks become Claude hooks', () => {
@@ -42,6 +56,15 @@ test('Cursor hooks become Claude hooks', () => {
   assert.deepEqual(claude.hooks.SessionStart, [
     { hooks: [{ type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}"/scripts/hello.sh' }] }
   ]);
+  assert.deepEqual(claude.dropped, []);
+});
+
+test('Cursor-only hook events are dropped rather than PascalCased into nothing', () => {
+  const claude = cursorHooksToClaude({
+    hooks: { beforeShellExecution: [{ command: './gate.sh' }], afterFileEdit: [{ command: './fmt.sh' }] }
+  });
+  assert.deepEqual(claude.hooks, {});
+  assert.deepEqual(claude.dropped.sort(), ['afterFileEdit', 'beforeShellExecution']);
 });
 
 test('Claude MCP becomes Agent Plugins MCP', () => {
@@ -151,18 +174,23 @@ description: Greet the user
 
     const first = await adaptPlugin({ source, dest, register: false });
     assert.equal(first.name, 'greet');
-    assert.ok(first.wrote.includes('hooks/hooks.json'));
+    // The source already ships correctly shaped plugin hooks, so they arrive
+    // with the rest of hooks/ and need no rewrite.
+    assert.ok(first.wrote.includes('hooks/'));
     assert.ok(first.wrote.includes('mcp.json'));
     assert.ok(first.wrote.includes('scripts/'));
 
-    const cursorHooks = JSON.parse(await readFile(path.join(dest, 'hooks', 'hooks.json'), 'utf8')) as {
-      hooks: { sessionStart: Array<{ command: string }> };
+    // Plugin hooks stay PascalCase — every client reads this same file.
+    const pluginHooks = JSON.parse(await readFile(path.join(dest, 'hooks', 'hooks.json'), 'utf8')) as {
+      hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
     };
-    assert.equal(cursorHooks.hooks.sessionStart[0]?.command, './scripts/hello.sh');
-    const claudeHooks = JSON.parse(await readFile(path.join(dest, 'hooks', 'claude-hooks.json'), 'utf8')) as {
-      hooks: { SessionStart: unknown };
-    };
-    assert.ok(claudeHooks.hooks.SessionStart);
+    assert.ok(pluginHooks.hooks.SessionStart);
+    assert.match(
+      pluginHooks.hooks.SessionStart[0]?.hooks[0]?.command ?? '',
+      /\$\{CLAUDE_PLUGIN_ROOT\}/
+    );
+    assert.equal(await exists(path.join(dest, 'hooks', 'claude-hooks.json')), false);
+
     const agentMcp = JSON.parse(await readFile(path.join(dest, 'mcp.json'), 'utf8')) as {
       $schema: string;
       mcpServers: { greet: { type: string; args: string[]; cwd: string } };
@@ -173,14 +201,27 @@ description: Greet the user
     assert.equal(agentMcp.mcpServers.greet.cwd, './');
     const script = await readFile(path.join(dest, 'scripts', 'hello.sh'), 'utf8');
     assert.match(script, /echo hi/);
+
+    // hooks/hooks.json is auto-discovered, so no manifest should point at it.
     const claudeManifest = JSON.parse(
       await readFile(path.join(dest, '.claude-plugin', 'plugin.json'), 'utf8')
-    ) as { hooks: string };
-    assert.equal(claudeManifest.hooks, './hooks/claude-hooks.json');
+    ) as { hooks?: string };
+    assert.equal(claudeManifest.hooks, undefined);
+
+    // Codex points at the file it actually loads; Cursor inlines the servers.
     const codex = JSON.parse(await readFile(path.join(dest, '.codex-plugin', 'plugin.json'), 'utf8')) as {
-      mcpServers: { greet: { cwd: string } };
+      mcpServers: string;
+      skills: string;
     };
-    assert.equal(codex.mcpServers.greet.cwd, '.');
+    assert.equal(codex.mcpServers, './.mcp.json');
+    assert.equal(codex.skills, './skills/');
+    const cursor = JSON.parse(await readFile(path.join(dest, '.cursor-plugin', 'plugin.json'), 'utf8')) as {
+      mcpServers: { greet: { command: string; args: string[] } };
+      skills: string;
+    };
+    assert.equal(cursor.skills, './skills/');
+    assert.equal(cursor.mcpServers.greet.command, 'node');
+    assert.equal(cursor.mcpServers.greet.args[0], './server.js');
 
     const second = await adaptPlugin({ source, dest, register: false });
     assert.equal(second.wrote.length, 0);

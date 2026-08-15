@@ -1,8 +1,14 @@
 {
+  "description": "Announce hello plugin load on session start",
   "hooks": {
-    "sessionStart": [
+    "SessionStart": [
       {
-        "command": "./scripts/hello.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/hello.sh"
+          }
+        ]
       }
     ]
   }
