@@ -37,6 +37,14 @@ const PROTOCOL_VERSION = '2025-06-18';
 const INITIALIZE_ID = 1;
 const TOOLS_LIST_ID = 2;
 const STDERR_LIMIT = 4_000;
+/**
+ * A tools/list response is a single line and can legitimately be large, so this
+ * is generous — it exists only to stop a server that streams unparsable output
+ * forever from exhausting memory before the timeout fires.
+ */
+const STDOUT_LIMIT = 16 * 1024 * 1024;
+/** Kill the process group where the OS has them: `npx`-style launchers fork. */
+const KILL_GROUP = process.platform !== 'win32';
 
 type ProbeTool = ProbeResult['tools'][number];
 
@@ -55,8 +63,12 @@ type RpcResponse = {
 
 export async function probeMcpServer(entry: McpEntry, opts: ProbeOptions = {}): Promise<ProbeResult> {
   const started = Date.now();
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const outcome = await runProbe(entry, timeoutMs, opts.env);
+  const timeoutMs = positiveOr(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
+  // This function is the contract boundary: a probe reports failure, it never
+  // rejects, so one hostile server cannot take down a whole scan.
+  const outcome = await runProbe(entry, timeoutMs, opts.env).catch(
+    (error: unknown): Outcome => ({ ok: false, error: messageOf(error), tools: [] })
+  );
   const totalTokens = outcome.tools.reduce((sum, tool) => sum + tool.tokens, 0);
   return {
     server: entry.name,
@@ -73,7 +85,9 @@ export async function probeAll(
   entries: McpEntry[],
   opts: { timeoutMs?: number; concurrency?: number } = {}
 ): Promise<ProbeResult[]> {
-  const limit = Math.max(1, Math.trunc(opts.concurrency ?? DEFAULT_CONCURRENCY));
+  // `Math.trunc(NaN)` is NaN, and `Array.from({ length: NaN })` builds no
+  // workers at all — which used to return an array of holes typed as results.
+  const limit = Math.max(1, Math.trunc(positiveOr(opts.concurrency, DEFAULT_CONCURRENCY)));
   const results: ProbeResult[] = new Array<ProbeResult>(entries.length);
   let cursor = 0;
 
@@ -81,9 +95,22 @@ export async function probeAll(
     for (;;) {
       const index = cursor;
       cursor += 1;
+      if (index >= entries.length) {
+        return;
+      }
       const entry = entries[index];
       if (!entry) {
-        return;
+        // A hole in the input must not end the worker: the entries after it
+        // still deserve a probe, and every slot still owes a result.
+        results[index] = {
+          server: `entry ${index}`,
+          ok: false,
+          error: 'missing entry',
+          durationMs: 0,
+          tools: [],
+          totalTokens: 0
+        };
+        continue;
       }
       results[index] = await probeMcpServer(entry, {
         ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {})
@@ -122,6 +149,10 @@ async function runProbe(
   const options: SpawnOptions = {
     // Never 'inherit': a server that reads stdin would swallow the parent's.
     stdio: ['pipe', 'pipe', 'pipe'],
+    // Its own process group, so the kill below reaps the whole tree. MCP
+    // servers are usually launched through `npx`/`uvx`, which fork the real
+    // server as a child; signalling only the launcher leaves that orphaned.
+    detached: KILL_GROUP,
     ...(entry.cwd ? { cwd: entry.cwd } : {}),
     env: { ...process.env, ...entry.env, ...envOverride }
   };
@@ -153,11 +184,12 @@ async function converse(child: ChildProcess, timeoutMs: number): Promise<Outcome
   child.stderr?.setEncoding('utf8');
   child.stderr?.on('data', (chunk: string) => {
     if (stderr.length < STDERR_LIMIT) {
-      stderr += chunk;
+      stderr = (stderr + chunk).slice(0, STDERR_LIMIT);
     }
   });
 
   let buffer = '';
+  let overflowed = false;
   child.stdout?.setEncoding('utf8');
   child.stdout?.on('data', (chunk: string) => {
     buffer += chunk;
@@ -170,6 +202,20 @@ async function converse(child: ChildProcess, timeoutMs: number): Promise<Outcome
       }
       newline = buffer.indexOf('\n');
     }
+    if (buffer.length > STDOUT_LIMIT) {
+      // No newline in sight and the line is already absurd. Drop it rather
+      // than let a babbling server grow the heap until the timeout.
+      overflowed = true;
+      buffer = '';
+    }
+  });
+
+  // 'exit' means the process is gone; 'close' additionally means its pipes are
+  // drained. The conversation cares about 'close' (data may still arrive),
+  // teardown cares about 'exit' (a leaked pipe must not delay it).
+  const exited = new Promise<void>((resolve) => {
+    child.once('exit', () => resolve());
+    child.once('error', () => resolve());
   });
 
   const closed = new Promise<void>((resolve) => {
@@ -180,6 +226,13 @@ async function converse(child: ChildProcess, timeoutMs: number): Promise<Outcome
     child.once('close', (code, signal) => {
       exitCode = code;
       exitSignal = signal;
+      // A server that writes its last reply without a trailing newline and
+      // exits has still answered; the newline is a framing detail, not consent.
+      const tail = buffer.trim();
+      buffer = '';
+      if (tail) {
+        deliver(tail, waiters);
+      }
       resolve();
     });
   });
@@ -236,17 +289,23 @@ async function converse(child: ChildProcess, timeoutMs: number): Promise<Outcome
   });
   const died = closed.then(() => 'closed' as const);
 
-  const raced = await Promise.race([conversation, deadline, died]);
-  clearTimeout(timer);
-
-  await terminate(child, closed);
+  let raced: Outcome | 'timeout' | 'closed';
+  try {
+    raced = await Promise.race([conversation, deadline, died]);
+  } finally {
+    // Whatever happened above — including a throw while pricing tools — the
+    // child must not outlive this call.
+    clearTimeout(timer);
+    await terminate(child, exited);
+    release(child);
+  }
 
   if (raced === 'timeout') {
-    return { ok: false, error: withStderr(`timed out after ${timeoutMs}ms`, stderr), tools: [] };
+    return { ok: false, error: withStderr(note(`timed out after ${timeoutMs}ms`, overflowed), stderr), tools: [] };
   }
   if (raced === 'closed') {
     const reason = spawnError ?? exitDescription(exitCode, exitSignal);
-    return { ok: false, error: withStderr(reason, stderr), tools: [] };
+    return { ok: false, error: withStderr(note(reason, overflowed), stderr), tools: [] };
   }
   if (!raced.ok && raced.error !== undefined) {
     return { ...raced, error: withStderr(raced.error, stderr) };
@@ -255,22 +314,86 @@ async function converse(child: ChildProcess, timeoutMs: number): Promise<Outcome
 }
 
 /** SIGTERM, then SIGKILL if it is still alive. Never leave the child behind. */
-async function terminate(child: ChildProcess, closed: Promise<void>): Promise<void> {
+async function terminate(child: ChildProcess, exited: Promise<void>): Promise<void> {
   const running = child.pid !== undefined && child.exitCode === null && child.signalCode === null;
   if (!running) {
-    await closed;
+    await settleWithin(exited, KILL_GRACE_MS);
     return;
   }
   child.stdin?.end();
-  child.kill('SIGTERM');
-  const hardKill = setTimeout(() => {
-    child.kill('SIGKILL');
-  }, KILL_GRACE_MS);
+  killTree(child, 'SIGTERM');
+  const hardKill = setTimeout(() => killTree(child, 'SIGKILL'), KILL_GRACE_MS);
+  hardKill.unref();
   try {
-    await closed;
+    // Bounded even so. SIGKILL is reliable for the process we spawned, but a
+    // server that daemonised itself into a new session is outside any group
+    // we can signal, and waiting forever on it would hang the whole scan.
+    await settleWithin(exited, KILL_GRACE_MS * 2);
   } finally {
     clearTimeout(hardKill);
   }
+}
+
+/**
+ * Drop every handle the probe still holds on the child.
+ *
+ * A grandchild that inherited the server's stdout keeps those pipes open long
+ * after the server is dead, and libuv counts an open pipe as a reason to keep
+ * running — so without this the caller gets its answer and then hangs at exit.
+ */
+function release(child: ChildProcess): void {
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    try {
+      stream?.destroy();
+    } catch {
+      // Already torn down.
+    }
+  }
+  child.unref();
+}
+
+/** Signal the child's whole process group, falling back to the child alone. */
+function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (pid === undefined) {
+    return;
+  }
+  if (KILL_GROUP) {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // No group, or it is already gone. Fall through to the direct kill.
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // Already reaped.
+  }
+}
+
+/** Await `promise`, but give up after `ms` rather than wait forever. */
+async function settleWithin(promise: Promise<void>, ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const bound = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+    // Never hold the event loop open just to observe a corpse.
+    timer.unref();
+  });
+  try {
+    await Promise.race([promise, bound]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function note(message: string, overflowed: boolean): string {
+  return overflowed ? `${message} (discarded oversized stdout)` : message;
+}
+
+function positiveOr(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function deliver(line: string, waiters: Map<number, (response: RpcResponse) => void>): void {
@@ -281,15 +404,35 @@ function deliver(line: string, waiters: Map<number, (response: RpcResponse) => v
     // Servers legitimately print banners and log lines to stdout.
     return;
   }
-  if (!isRecord(message) || typeof message.id !== 'number') {
+  if (!isRecord(message)) {
     return;
   }
-  const waiter = waiters.get(message.id);
+  const id = correlationId(message.id);
+  if (id === undefined) {
+    // A notification, or a reply we never asked for.
+    return;
+  }
+  const waiter = waiters.get(id);
   if (!waiter) {
     return;
   }
-  waiters.delete(message.id);
+  waiters.delete(id);
   waiter(message as RpcResponse);
+}
+
+/**
+ * JSON-RPC says a reply echoes the request id unchanged, but servers that round
+ * -trip ids through a string type answer `"1"` to `1`. Matching those costs
+ * nothing and saves a full timeout per server.
+ */
+function correlationId(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && /^-?\d+$/.test(value)) {
+    return Number(value);
+  }
+  return undefined;
 }
 
 function readTools(result: unknown): ProbeTool[] {
@@ -303,16 +446,30 @@ function readTools(result: unknown): ProbeTool[] {
     }
     const name = raw.name;
     const description = typeof raw.description === 'string' ? raw.description : '';
-    // Priced exactly as the fields arrive on the wire, since that is what the
-    // client forwards to the model.
-    const tokens = estimateJsonTokens({
-      name,
-      description,
-      ...(raw.inputSchema !== undefined ? { inputSchema: raw.inputSchema } : {})
-    });
-    tools.push({ name, description, tokens });
+    tools.push({ name, description, tokens: priceTool(name, description, raw.inputSchema) });
   }
   return tools;
+}
+
+/**
+ * Priced exactly as the fields arrive on the wire, since that is what the
+ * client forwards to the model. A schema nested deeply enough to overflow the
+ * stringify stack costs a degraded estimate, not a thrown probe.
+ */
+function priceTool(name: string, description: string, inputSchema: unknown): number {
+  try {
+    return estimateJsonTokens({
+      name,
+      description,
+      ...(inputSchema !== undefined ? { inputSchema } : {})
+    });
+  } catch {
+    try {
+      return estimateJsonTokens({ name, description });
+    } catch {
+      return 0;
+    }
+  }
 }
 
 function readServerInfo(result: unknown): { name: string; version: string } | undefined {

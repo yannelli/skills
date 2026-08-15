@@ -1,18 +1,10 @@
-import { mkdir, rename } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { mkdir, readFile, readdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter } from '../frontmatter.js';
 import { backupDir, claudePaths } from './client-paths.js';
 import { collectSkillDirs } from './skill-dirs.js';
-import {
-  isDir,
-  isFile,
-  listDirs,
-  listFiles,
-  readJson,
-  readJsonChecked,
-  readText,
-  writeJsonSafely
-} from './safe-io.js';
+import { isDir, isFile, parseJsonc, readText, writeJsonSafely } from './safe-io.js';
 import type { WriteResult } from './safe-io.js';
 import { SKILL_VISIBILITIES } from './types.js';
 import type {
@@ -69,13 +61,20 @@ export type ClaudeHookEvent = (typeof CLAUDE_HOOK_EVENTS)[number];
 
 const HOOK_EVENTS = new Set<string>(CLAUDE_HOOK_EVENTS);
 
-/** Settings layers, lowest precedence first. */
+/**
+ * Settings layers, lowest precedence first.
+ *
+ * Managed policy sits at the *top*, not the bottom: an enterprise
+ * `managed-settings.json` is the one layer a developer cannot override, so a
+ * merge that let `~/.claude/settings.json` win over it would report a policy
+ * as inactive when the client is still enforcing it.
+ */
 export const CLAUDE_SETTINGS_LEVELS = [
-  'managed',
   'user',
-  'project',
   'userLocal',
-  'projectLocal'
+  'project',
+  'projectLocal',
+  'managed'
 ] as const;
 
 export type ClaudeSettingsLevel = (typeof CLAUDE_SETTINGS_LEVELS)[number];
@@ -96,11 +95,11 @@ export const SKILL_LISTING_BUDGET_FRACTION_DEFAULT = 0.01;
 export function claudeSettingsFiles(projectRoot: string): ClaudeSettingsFile[] {
   const paths = claudePaths(projectRoot);
   return [
-    { level: 'managed', scope: 'builtin', file: paths.managedSettings },
     { level: 'user', scope: 'user', file: paths.userSettings },
-    { level: 'project', scope: 'project', file: paths.projectSettings },
     { level: 'userLocal', scope: 'local', file: paths.userLocalSettings },
-    { level: 'projectLocal', scope: 'local', file: paths.projectLocalSettings }
+    { level: 'project', scope: 'project', file: paths.projectSettings },
+    { level: 'projectLocal', scope: 'local', file: paths.projectLocalSettings },
+    { level: 'managed', scope: 'builtin', file: paths.managedSettings }
   ];
 }
 
@@ -135,6 +134,8 @@ export type ClaudeSettingsSources = {
   mcpjsonServers: Record<string, string>;
   /** Keyed by marketplace id. */
   extraKnownMarketplaces: Record<string, string>;
+  /** The file holding `projects[<root>].disabledMcpServers`, when any. */
+  disabledMcpServers?: string;
 };
 
 export type ClaudeSettingsView = {
@@ -150,6 +151,12 @@ export type ClaudeSettingsView = {
   mcpjsonServers: Record<string, boolean>;
   enabledMcpjsonServers: string[];
   disabledMcpjsonServers: string[];
+  /**
+   * Servers switched off for this project in `~/.claude.json`, by the name the
+   * client uses there: a bare name for a user or `.mcp.json` server, and
+   * `plugin:<plugin>:<server>` for one a plugin brought in.
+   */
+  disabledMcpServers: string[];
   disableAllHooks: boolean;
   disableBundledSkills: boolean;
   extraKnownMarketplaces: Record<string, Record<string, unknown>>;
@@ -173,6 +180,18 @@ export type ClaudeScan = {
 
 type LoadedSettings = { source: ClaudeSettingsFile; value: Record<string, unknown> };
 
+/**
+ * `~/.claude.json` — global client state rather than a settings file. It holds
+ * the user-scope MCP servers, and under `projects[<root>]` the per-project
+ * answers to the client's own prompts (which `.mcp.json` servers were
+ * approved, which servers were switched off).
+ */
+type ClaudeGlobalConfig = {
+  file: string;
+  value?: Record<string, unknown>;
+  project?: Record<string, unknown>;
+};
+
 type PluginComponents = {
   skills: SkillEntry[];
   agents: AgentEntry[];
@@ -186,14 +205,8 @@ export async function scanClaude(projectRoot: string): Promise<ClaudeScan> {
   const warnings: ScanWarning[] = [];
 
   const loaded = await loadSettings(projectRoot, warnings);
-  const global = await readGlobalConfig(paths.globalConfig, warnings);
-  const settings = mergeSettings(
-    claudeSettingsFiles(projectRoot),
-    loaded,
-    global,
-    paths.globalConfig,
-    warnings
-  );
+  const global = await readGlobalConfig(paths.globalConfig, projectRoot, warnings);
+  const settings = mergeSettings(claudeSettingsFiles(projectRoot), loaded, global, warnings);
 
   const skills: SkillEntry[] = [];
   const plugins: PluginEntry[] = [];
@@ -227,6 +240,7 @@ export async function scanClaude(projectRoot: string): Promise<ClaudeScan> {
 
   hooks.push(...hooksFromSettings(loaded, settings, warnings));
 
+  mcpServers.push(...globalMcpServers(global, settings, warnings));
   mcpServers.push(...(await scanProjectMcp(paths.projectMcp, settings, paths.globalConfig, warnings)));
 
   memory.push(...(await scanMemory(paths, warnings)));
@@ -381,34 +395,39 @@ export async function setSkillDirectoryEnabled(opts: {
 async function loadSettings(projectRoot: string, warnings: ScanWarning[]): Promise<LoadedSettings[]> {
   const loaded: LoadedSettings[] = [];
   for (const source of claudeSettingsFiles(projectRoot)) {
-    const result = await readJsonChecked<unknown>(source.file);
-    if (result.missing) {
-      continue;
+    const record = await readRecordFile(source.file, warnings);
+    if (record) {
+      loaded.push({ source, value: record });
     }
-    if (result.error !== undefined) {
-      warnings.push({ client: 'claude', file: source.file, message: `invalid JSON: ${result.error}` });
-      continue;
-    }
-    const record = asRecord(result.value);
-    if (!record) {
-      warnings.push({ client: 'claude', file: source.file, message: 'expected a JSON object' });
-      continue;
-    }
-    loaded.push({ source, value: record });
   }
   return loaded;
 }
 
 async function readGlobalConfig(
   file: string,
+  projectRoot: string,
+  warnings: ScanWarning[]
+): Promise<ClaudeGlobalConfig> {
+  const value = await readRecordFile(file, warnings);
+  if (!value) {
+    return { file };
+  }
+  // Claude Code keys `projects` by the absolute path it was started in.
+  const project = asRecord(asRecord(value.projects)?.[path.resolve(projectRoot)]);
+  return { file, value, ...(project ? { project } : {}) };
+}
+
+/** Read a JSON object, turning every failure into a warning rather than silence. */
+async function readRecordFile(
+  file: string,
   warnings: ScanWarning[]
 ): Promise<Record<string, unknown> | undefined> {
-  const result = await readJsonChecked<unknown>(file);
+  const result = await readJsonFile(file);
   if (result.missing) {
     return undefined;
   }
   if (result.error !== undefined) {
-    warnings.push({ client: 'claude', file, message: `invalid JSON: ${result.error}` });
+    warnings.push({ client: 'claude', file, message: result.error });
     return undefined;
   }
   const record = asRecord(result.value);
@@ -422,8 +441,7 @@ async function readGlobalConfig(
 function mergeSettings(
   files: ClaudeSettingsFile[],
   loaded: LoadedSettings[],
-  global: Record<string, unknown> | undefined,
-  globalFile: string,
+  global: ClaudeGlobalConfig,
   warnings: ScanWarning[]
 ): ClaudeSettingsView {
   const sources: ClaudeSettingsSources = {
@@ -440,6 +458,7 @@ function mergeSettings(
   let skillListingBudgetFraction = SKILL_LISTING_BUDGET_FRACTION_DEFAULT;
   let disableAllHooks = false;
   let disableBundledSkills = false;
+  let enableAllProjectMcpServers = false;
 
   for (const { source, value } of loaded) {
     const file = source.file;
@@ -506,12 +525,37 @@ function mergeSettings(
       disableBundledSkills = value.disableBundledSkills;
       sources.disableBundledSkills = file;
     }
+    if (typeof value.enableAllProjectMcpServers === 'boolean') {
+      enableAllProjectMcpServers = value.enableAllProjectMcpServers;
+      sources.enableAllProjectMcpServers = file;
+    }
   }
 
-  let enableAllProjectMcpServers = false;
-  if (typeof global?.enableAllProjectMcpServers === 'boolean') {
-    enableAllProjectMcpServers = global.enableAllProjectMcpServers;
-    sources.enableAllProjectMcpServers = globalFile;
+  // `~/.claude.json` is not a settings file, but it is where the running client
+  // records the answers to its own prompts, so for the keys it writes there it
+  // is the last word. A live install keeps `disableBundledSkills` here even
+  // though the same key is documented for settings.json.
+  const globalValue = global.value;
+  if (typeof globalValue?.disableBundledSkills === 'boolean') {
+    disableBundledSkills = globalValue.disableBundledSkills;
+    sources.disableBundledSkills = global.file;
+  }
+  if (typeof globalValue?.enableAllProjectMcpServers === 'boolean') {
+    enableAllProjectMcpServers = globalValue.enableAllProjectMcpServers;
+    sources.enableAllProjectMcpServers = global.file;
+  }
+  for (const name of asStringArray(global.project?.enabledMcpjsonServers) ?? []) {
+    mcpjsonServers[name] = true;
+    sources.mcpjsonServers[name] = global.file;
+  }
+  for (const name of asStringArray(global.project?.disabledMcpjsonServers) ?? []) {
+    mcpjsonServers[name] = false;
+    sources.mcpjsonServers[name] = global.file;
+  }
+
+  const disabledMcpServers = asStringArray(global.project?.disabledMcpServers) ?? [];
+  if (disabledMcpServers.length > 0) {
+    sources.disabledMcpServers = global.file;
   }
 
   return {
@@ -524,6 +568,7 @@ function mergeSettings(
     mcpjsonServers,
     enabledMcpjsonServers: Object.keys(mcpjsonServers).filter((name) => mcpjsonServers[name]).sort(),
     disabledMcpjsonServers: Object.keys(mcpjsonServers).filter((name) => !mcpjsonServers[name]).sort(),
+    disabledMcpServers,
     disableAllHooks,
     disableBundledSkills,
     extraKnownMarketplaces,
@@ -542,7 +587,8 @@ async function scanSkillDir(
   const entries: SkillEntry[] = [];
   // `dir` is the directory holding skills; `skillDirs` overrides that for
   // plugins, whose manifests may declare nested or out-of-tree skill paths.
-  const skillDirs = opts.skillDirs ?? (await listDirs(dir)).map((name) => path.join(dir, name));
+  const skillDirs =
+    opts.skillDirs ?? (await listChildDirs(dir, warnings)).map((name) => path.join(dir, name));
   for (const skillDir of skillDirs) {
     const name = path.basename(skillDir);
     const file = path.join(skillDir, 'SKILL.md');
@@ -598,11 +644,11 @@ function resolveVisibility(
   if (opts.disabled) {
     return { visibility: 'off', source: path.dirname(skillDir) };
   }
-  // The settings schema is explicit that skillOverrides does not reach plugin skills.
-  if (opts.plugin) {
-    return { visibility: 'on' };
-  }
-  for (const key of [qualifiedName, name]) {
+  // Plugin skills are keyed by `<plugin>:<skill>` and nothing else: a live
+  // install's settings.json disables them exactly that way, and matching on the
+  // bare name as well would let one plugin's skill inherit an override meant
+  // for a personal skill of the same name.
+  for (const key of opts.plugin ? [qualifiedName] : [name]) {
     const override = settings.skillOverrides[key];
     if (override) {
       const source = settings.sources.skillOverrides[key];
@@ -619,7 +665,7 @@ async function scanDocDir(
   plugin?: string
 ): Promise<AgentEntry[]> {
   const entries: AgentEntry[] = [];
-  for (const found of await collectMarkdown(dir)) {
+  for (const found of await collectMarkdown(dir, warnings)) {
     const raw = await readText(found.file);
     if (raw === undefined) {
       warnings.push({ client: 'claude', file: found.file, message: 'could not read file' });
@@ -643,16 +689,19 @@ async function scanDocDir(
 /** Agents and commands may be namespaced by subdirectory, as `dir:name`. */
 async function collectMarkdown(
   dir: string,
+  warnings: ScanWarning[],
   prefix = '',
   depth = 0
 ): Promise<{ name: string; file: string }[]> {
   const found: { name: string; file: string }[] = [];
-  for (const name of await listFiles(dir, ['.md'])) {
+  for (const name of await listChildFiles(dir, '.md', warnings)) {
     found.push({ name: `${prefix}${name.slice(0, -'.md'.length)}`, file: path.join(dir, name) });
   }
   if (depth < 2) {
-    for (const sub of await listDirs(dir)) {
-      found.push(...(await collectMarkdown(path.join(dir, sub), `${prefix}${sub}:`, depth + 1)));
+    for (const sub of await listChildDirs(dir, warnings)) {
+      found.push(
+        ...(await collectMarkdown(path.join(dir, sub), warnings, `${prefix}${sub}:`, depth + 1))
+      );
     }
   }
   return found;
@@ -782,12 +831,16 @@ async function scanProjectMcp(
         : settings.enableAllProjectMcpServers
           ? globalFile
           : undefined;
+    const decided = applyMcpSwitch(name, settings, {
+      enabled: approved ?? settings.enableAllProjectMcpServers,
+      ...(source ? { source } : {})
+    });
     const entry = toMcpEntry(name, raw, {
       id: `claude:project:${name}`,
       scope: 'project',
       file,
-      enabled: approved ?? settings.enableAllProjectMcpServers,
-      ...(source ? { enabledSource: source } : {}),
+      enabled: decided.enabled,
+      ...(decided.source ? { enabledSource: decided.source } : {}),
       warnings
     });
     if (entry) {
@@ -797,22 +850,97 @@ async function scanProjectMcp(
   return entries;
 }
 
-async function readMcpFile(file: string, warnings: ScanWarning[]): Promise<Record<string, unknown>> {
-  const result = await readJsonChecked<unknown>(file);
+/** The user-scope and project-local servers Claude Code keeps in `~/.claude.json`. */
+function globalMcpServers(
+  global: ClaudeGlobalConfig,
+  settings: ClaudeSettingsView,
+  warnings: ScanWarning[]
+): McpEntry[] {
+  const entries: McpEntry[] = [];
+  // Project-local first: a server added with `--scope local` shadows a user
+  // server of the same name, and the more specific one is the one in force.
+  const layers: { scope: Scope; servers: Record<string, unknown> | undefined }[] = [
+    { scope: 'local', servers: asRecord(global.project?.mcpServers) },
+    { scope: 'user', servers: asRecord(global.value?.mcpServers) }
+  ];
+  const claimed = new Set<string>();
+
+  for (const layer of layers) {
+    for (const [name, raw] of Object.entries(layer.servers ?? {})) {
+      if (claimed.has(name)) {
+        continue;
+      }
+      const decided = applyMcpSwitch(name, settings, { enabled: true });
+      const entry = toMcpEntry(name, raw, {
+        id: `claude:${layer.scope}:${name}`,
+        scope: layer.scope,
+        file: global.file,
+        enabled: decided.enabled,
+        ...(decided.source ? { enabledSource: decided.source } : {}),
+        warnings
+      });
+      if (entry) {
+        claimed.add(name);
+        entries.push(entry);
+      }
+    }
+  }
+  return entries;
+}
+
+/** `projects[<root>].disabledMcpServers` overrides however a server got switched on. */
+function applyMcpSwitch(
+  key: string,
+  settings: ClaudeSettingsView,
+  fallback: { enabled: boolean; source?: string }
+): { enabled: boolean; source?: string } {
+  if (settings.disabledMcpServers.includes(key)) {
+    const source = settings.sources.disabledMcpServers;
+    return { enabled: false, ...(source ? { source } : {}) };
+  }
+  return fallback;
+}
+
+async function readMcpFile(
+  file: string,
+  warnings: ScanWarning[],
+  opts: { allowBareMap?: boolean } = {}
+): Promise<Record<string, unknown>> {
+  const result = await readJsonFile(file);
   if (result.missing) {
     return {};
   }
   if (result.error !== undefined) {
-    warnings.push({ client: 'claude', file, message: `invalid JSON: ${result.error}` });
+    warnings.push({ client: 'claude', file, message: result.error });
     return {};
   }
   const record = asRecord(result.value);
   const servers = asRecord(record?.mcpServers);
-  if (!servers) {
-    warnings.push({ client: 'claude', file, message: 'expected an object with an mcpServers key' });
-    return {};
+  if (servers) {
+    return servers;
   }
-  return servers;
+  // Plugins ship both shapes. The official playwright plugin's `.mcp.json` is a
+  // bare `{ "<name>": { command } }` map with no `mcpServers` wrapper, and
+  // Claude Code loads it, so rejecting that shape drops a real server.
+  if (opts.allowBareMap && record && isServerMap(record)) {
+    return record;
+  }
+  warnings.push({ client: 'claude', file, message: 'expected an object with an mcpServers key' });
+  return {};
+}
+
+function isServerMap(record: Record<string, unknown>): boolean {
+  const entries = Object.entries(record);
+  if (entries.length === 0) {
+    return false;
+  }
+  return entries.every(([, value]) => {
+    const server = asRecord(value);
+    return (
+      server !== undefined &&
+      (typeof server.command === 'string' || typeof server.url === 'string')
+    );
+  });
 }
 
 function toMcpEntry(
@@ -882,7 +1010,7 @@ async function scanMemory(
     { scope: 'user', file: paths.userMemory },
     { scope: 'project', file: paths.projectMemory }
   ];
-  for (const name of await listFiles(paths.userRules, ['.md'])) {
+  for (const name of await listChildFiles(paths.userRules, '.md', warnings)) {
     candidates.push({ scope: 'user', file: path.join(paths.userRules, name) });
   }
 
@@ -922,22 +1050,22 @@ async function scanPlugins(
   };
   const plugins: PluginEntry[] = [];
 
-  const installedFile = await readJsonChecked<unknown>(paths.installedPlugins);
+  const installedFile = await readJsonFile(paths.installedPlugins);
   if (installedFile.error !== undefined) {
     warnings.push({
       client: 'claude',
       file: paths.installedPlugins,
-      message: `invalid JSON: ${installedFile.error}`
+      message: installedFile.error
     });
   }
   const installedRecord = asRecord(asRecord(installedFile.value)?.plugins) ?? {};
 
-  const marketplacesFile = await readJsonChecked<unknown>(paths.knownMarketplaces);
+  const marketplacesFile = await readJsonFile(paths.knownMarketplaces);
   if (marketplacesFile.error !== undefined) {
     warnings.push({
       client: 'claude',
       file: paths.knownMarketplaces,
-      message: `invalid JSON: ${marketplacesFile.error}`
+      message: marketplacesFile.error
     });
   }
   const marketplaces = asRecord(marketplacesFile.value) ?? {};
@@ -1069,9 +1197,9 @@ async function discoverPluginComponents(
   );
 
   const hooksFile = path.join(root, 'hooks', 'hooks.json');
-  const hooksResult = await readJsonChecked<unknown>(hooksFile);
+  const hooksResult = await readJsonFile(hooksFile);
   if (hooksResult.error !== undefined) {
-    warnings.push({ client: 'claude', file: hooksFile, message: `invalid JSON: ${hooksResult.error}` });
+    warnings.push({ client: 'claude', file: hooksFile, message: hooksResult.error });
   } else if (!hooksResult.missing) {
     const record = asRecord(hooksResult.value);
     const events = asRecord(record?.hooks) ?? record ?? {};
@@ -1093,14 +1221,20 @@ async function discoverPluginComponents(
 
   const mcpFile = path.join(root, '.mcp.json');
   if (await isFile(mcpFile)) {
-    for (const [name, raw] of Object.entries(await readMcpFile(mcpFile, warnings))) {
+    const servers = await readMcpFile(mcpFile, warnings, { allowBareMap: true });
+    for (const [name, raw] of Object.entries(servers)) {
+      // `/mcp` records a plugin's server under this composite name.
+      const decided = applyMcpSwitch(`plugin:${plugin}:${name}`, settings, {
+        enabled,
+        ...(owner.enabledSource ? { source: owner.enabledSource } : {})
+      });
       const entry = toMcpEntry(name, raw, {
         id: `claude:plugin:${plugin}:${name}`,
         scope: 'plugin',
         file: mcpFile,
         plugin,
-        enabled,
-        ...(owner.enabledSource ? { enabledSource: owner.enabledSource } : {}),
+        enabled: decided.enabled,
+        ...(decided.source ? { enabledSource: decided.source } : {}),
         warnings
       });
       if (entry) {
@@ -1120,13 +1254,13 @@ async function readManifest(
   file: string,
   warnings: ScanWarning[]
 ): Promise<{ description?: string; version?: string; skills?: unknown } | undefined> {
-  const result = await readJsonChecked<unknown>(file);
+  const result = await readJsonFile(file);
   if (result.missing) {
     // Auto-discovery is legal: a plugin needs no manifest.
     return undefined;
   }
   if (result.error !== undefined) {
-    warnings.push({ client: 'claude', file, message: `invalid JSON: ${result.error}` });
+    warnings.push({ client: 'claude', file, message: result.error });
     return undefined;
   }
   const record = asRecord(result.value);
@@ -1163,13 +1297,13 @@ async function resolvePluginKey(plugin: string, projectRoot: string): Promise<st
   }
   const paths = claudePaths(projectRoot);
   const keys = new Set<string>();
-  const installed = await readJson<unknown>(paths.installedPlugins);
-  for (const key of Object.keys(asRecord(asRecord(installed)?.plugins) ?? {})) {
+  const installed = await readJsonFile(paths.installedPlugins);
+  for (const key of Object.keys(asRecord(asRecord(installed.value)?.plugins) ?? {})) {
     keys.add(key);
   }
   for (const source of claudeSettingsFiles(projectRoot)) {
-    const settings = await readJson<unknown>(source.file);
-    for (const key of Object.keys(asRecord(asRecord(settings)?.enabledPlugins) ?? {})) {
+    const settings = await readJsonFile(source.file);
+    for (const key of Object.keys(asRecord(asRecord(settings.value)?.enabledPlugins) ?? {})) {
       keys.add(key);
     }
   }
@@ -1190,9 +1324,9 @@ async function resolvePluginKey(plugin: string, projectRoot: string): Promise<st
 }
 
 async function readSettingsForWrite(file: string): Promise<Record<string, unknown>> {
-  const result = await readJsonChecked<unknown>(file);
+  const result = await readJsonFile(file);
   if (result.error !== undefined) {
-    throw new Error(`refusing to edit ${file}: it is not valid JSON (${result.error})`);
+    throw new Error(`refusing to edit ${file}: ${result.error}`);
   }
   if (result.missing) {
     return {};
@@ -1226,6 +1360,101 @@ function isSkillVisibility(value: unknown): value is SkillVisibility {
 
 function isTransport(value: string): value is McpTransportKind {
   return value === 'stdio' || value === 'http' || value === 'sse' || value === 'ws';
+}
+
+type JsonRead = { value?: unknown; error?: string; missing: boolean };
+
+/**
+ * Read JSON, and say why when it cannot.
+ *
+ * `safe-io`'s reader cannot tell "no such file" from "cannot read it": both
+ * come back as `undefined`, so an unreadable `settings.json` — no permission,
+ * or a directory where a file belongs — would scan as an empty one and the
+ * report would quietly claim the developer has no settings at all. A leading
+ * BOM is stripped for the same reason: editors write it, the client copes
+ * with it, and a scan that calls the file corrupt would be lying.
+ */
+async function readJsonFile(file: string): Promise<JsonRead> {
+  let raw: string;
+  try {
+    raw = await readFile(file, 'utf8');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return { missing: true };
+    }
+    return { missing: false, error: `could not read: ${code ?? describe(error)}` };
+  }
+  try {
+    return { missing: false, value: parseJsonc<unknown>(stripBom(raw)) };
+  } catch (error) {
+    return { missing: false, error: `invalid JSON: ${describe(error)}` };
+  }
+}
+
+function stripBom(raw: string): string {
+  return raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Subdirectories, counting symlinks that point at one.
+ *
+ * `Dirent.isDirectory()` is false for a symlink, and linking a skill checked
+ * out elsewhere into `~/.claude/skills` is a normal setup — on the machine
+ * this was written against, every personal skill is a link, and a scan that
+ * trusted the dirent alone reported none of them.
+ */
+async function listChildDirs(dir: string, warnings: ScanWarning[]): Promise<string[]> {
+  const names: string[] = [];
+  for (const entry of await readEntries(dir, warnings)) {
+    if (entry.isDirectory()) {
+      names.push(entry.name);
+    } else if (entry.isSymbolicLink() && (await isDir(path.join(dir, entry.name)))) {
+      names.push(entry.name);
+    }
+  }
+  return names.sort();
+}
+
+/** Files with the given extension, counting symlinks that point at one. */
+async function listChildFiles(
+  dir: string,
+  extension: string,
+  warnings: ScanWarning[]
+): Promise<string[]> {
+  const names: string[] = [];
+  for (const entry of await readEntries(dir, warnings)) {
+    if (path.extname(entry.name) !== extension) {
+      continue;
+    }
+    if (entry.isFile()) {
+      names.push(entry.name);
+    } else if (entry.isSymbolicLink() && (await isFile(path.join(dir, entry.name)))) {
+      names.push(entry.name);
+    }
+  }
+  return names.sort();
+}
+
+async function readEntries(dir: string, warnings: ScanWarning[]): Promise<Dirent[]> {
+  try {
+    return await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // A directory that was never created is the normal case, not a problem.
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+      warnings.push({
+        client: 'claude',
+        file: dir,
+        message: `could not list directory: ${code ?? describe(error)}`
+      });
+    }
+    return [];
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   addMcpServer,
   parseToml,
@@ -433,6 +434,175 @@ test('a malformed plugin manifest warns and the plugin still lists', async () =>
   });
 });
 
+test('a symlinked skill is scanned, and a dangling link is reported', async () => {
+  await withFixture(async (fixture) => {
+    await buildFixture(fixture);
+    // Sharing one skill directory across clients by symlink is routine, and
+    // readdir reports a symlink as a link rather than as a directory.
+    const shared = path.join(fixture.home, 'shared', 'linked');
+    await write(path.join(shared, 'SKILL.md'), '---\nname: linked\ndescription: Shared.\n---\n');
+    await symlink(shared, path.join(fixture.codex, 'skills', 'linked'));
+    await symlink(path.join(fixture.home, 'gone'), path.join(fixture.codex, 'skills', 'dangling'));
+
+    const scan = await scanCodex(fixture.project);
+
+    const linked = scan.skills.find((skill) => skill.name === 'linked');
+    assert.equal(linked?.description, 'Shared.');
+    assert.equal(linked?.scope, 'user');
+    assert.equal(linked?.visibility, 'on');
+    assert.equal(
+      scan.skills.some((skill) => skill.name === 'dangling'),
+      false
+    );
+    assert.match(
+      scan.warnings.find(
+        (item) => item.file === path.join(fixture.codex, 'skills', 'dangling')
+      )?.message ?? '',
+      /does not resolve to a directory/
+    );
+  });
+});
+
+test('a file Codex cannot read is a warning, not an empty inventory', async () => {
+  await withFixture(async (fixture) => {
+    await buildFixture(fixture);
+    const config = path.join(fixture.codex, 'config.toml');
+    await chmod(config, 0o000);
+    // A directory where a file belongs reads as ENOTDIR/EISDIR, which is just
+    // as unreadable.
+    await rm(path.join(fixture.codex, 'hooks.json'));
+    await mkdir(path.join(fixture.codex, 'hooks.json'), { recursive: true });
+    await mkdir(path.join(fixture.codex, 'skills', 'alpha', 'SKILL.md.d'), { recursive: true });
+
+    const scan = await scanCodex(fixture.project);
+
+    // Everything readable is still reported.
+    assert.equal(scan.skills.length, 4);
+    assert.equal(scan.plugins.length, 2);
+    const unreadable = scan.warnings.filter((item) => /could not be read/.test(item.message));
+    const files = unreadable.map((item) => item.file);
+    if (process.getuid?.() !== 0) {
+      assert.ok(files.includes(config), `expected a warning for ${config}, got ${files.join()}`);
+      assert.equal(
+        scan.mcpServers.some((entry) => entry.scope === 'user'),
+        false
+      );
+    }
+    assert.ok(files.includes(path.join(fixture.codex, 'hooks.json')));
+    await chmod(config, 0o600);
+  });
+});
+
+test('config.toml oddities warn rather than disappear', async () => {
+  await withFixture(async (fixture) => {
+    await buildFixture(fixture);
+    const config = path.join(fixture.codex, 'config.toml');
+
+    // A byte-order mark must not cost the developer their whole config.
+    await write(config, `﻿model = "gpt"\n[mcp_servers.a]\ncommand = "node"\n`);
+    const withBom = await scanCodex(fixture.project);
+    assert.deepEqual(
+      withBom.mcpServers.filter((entry) => entry.scope === 'user').map((entry) => entry.name),
+      ['a']
+    );
+
+    // `mcp_servers` written as an array of tables is not a table, and silence
+    // would read as "you have no MCP servers".
+    await write(config, '[[mcp_servers]]\nname = "a"\n');
+    const wrongShape = await scanCodex(fixture.project);
+    assert.equal(
+      wrongShape.mcpServers.some((entry) => entry.scope === 'user'),
+      false
+    );
+    assert.match(
+      wrongShape.warnings.find((item) => item.file === config)?.message ?? '',
+      /mcp_servers is not a table/
+    );
+
+    // An empty config is a legitimate state, not a problem to report.
+    await write(config, '');
+    const empty = await scanCodex(fixture.project);
+    assert.deepEqual(
+      empty.warnings.filter((item) => item.file === config),
+      []
+    );
+  });
+});
+
+test('a plugin manifest cannot point the scan outside the plugin directory', async () => {
+  await withFixture(async (fixture) => {
+    await buildFixture(fixture);
+    // A skill sitting outside every Codex path. Nothing in a manifest should
+    // be able to pull it into the inventory.
+    await write(
+      path.join(fixture.home, 'outside', 'SKILL.md'),
+      '---\nname: outside\ndescription: Not a Codex skill.\n---\n'
+    );
+    const root = path.join(fixture.codex, 'plugins/cache/openai-curated/rogue/1.0.0');
+    await write(
+      path.join(root, '.codex-plugin', 'plugin.json'),
+      JSON.stringify({
+        name: 'rogue',
+        skills: ['../../../../../outside', './skills/'],
+        mcpServers: '/etc/hosts',
+        hooks: '../../../../../../hooks.json'
+      })
+    );
+
+    const scan = await scanCodex(fixture.project);
+
+    assert.equal(
+      scan.skills.some((skill) => skill.name === 'outside'),
+      false
+    );
+    const escapes = scan.warnings.filter((item) =>
+      /points outside the plugin directory/.test(item.message)
+    );
+    assert.equal(escapes.length, 3, JSON.stringify(scan.warnings, null, 2));
+    assert.equal(
+      escapes.every((item) => item.file === path.join(root, '.codex-plugin', 'plugin.json')),
+      true
+    );
+    // The plugin itself still lists, just with nothing in it.
+    const rogue = scan.plugins.find((plugin) => plugin.name === 'rogue');
+    assert.equal(rogue?.skills, 0);
+    assert.equal(rogue?.mcpServers, 0);
+    assert.equal(rogue?.hooks, 0);
+  });
+});
+
+test('a plugin named differently from its cache directory is listed once', async () => {
+  await withFixture(async (fixture) => {
+    await buildFixture(fixture);
+    const marketplace = path.join(fixture.codex, 'plugins/cache/openai-curated');
+    await write(
+      path.join(marketplace, 'linear', '0.2.0', '.codex-plugin', 'plugin.json'),
+      // The cache directory is `linear`; the manifest calls it `linear`, and
+      // the marketplace lists it — one entry, not two.
+      JSON.stringify({ name: 'linear', version: '0.2.0' })
+    );
+    await write(
+      path.join(marketplace, 'gh-pr', '0.1.0', '.codex-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'github', version: '0.1.0' })
+    );
+
+    const scan = await scanCodex(fixture.project);
+
+    assert.deepEqual(
+      scan.plugins.filter((plugin) => plugin.name === 'linear').map((plugin) => plugin.installed),
+      [true]
+    );
+    // Two installed plugins both calling themselves `github` keep distinct
+    // ids, so indexing the inventory by id cannot lose one.
+    assert.deepEqual(
+      scan.plugins.filter((plugin) => plugin.name === 'github').map((plugin) => plugin.id),
+      ['codex:plugin:github', 'codex:plugin:github@openai-curated']
+    );
+    const ids = scan.plugins.map((plugin) => plugin.id);
+    assert.equal(new Set(ids).size, ids.length, ids.join());
+  });
+});
+
 test('setSkillDirectoryEnabled moves the skill directory both ways', async () => {
   await withFixture(async (fixture) => {
     await buildFixture(fixture);
@@ -454,9 +624,40 @@ test('setSkillDirectoryEnabled moves the skill directory both ways', async () =>
     const on = await setSkillDirectoryEnabled({ skill: 'alpha', enabled: true });
     assert.equal(on.moved, true);
     assert.equal(await isDir(enabled), true);
+  });
+});
 
-    // A skill that does not exist is a no-op, not a crash.
-    assert.equal((await setSkillDirectoryEnabled({ skill: 'ghost', enabled: false })).moved, false);
+test('setSkillDirectoryEnabled refuses anything that is not a plain skill name', async () => {
+  await withFixture(async (fixture) => {
+    await buildFixture(fixture);
+
+    // A typo must not report success: nothing was disabled.
+    await assert.rejects(
+      () => setSkillDirectoryEnabled({ skill: 'ghost', enabled: false }),
+      /no personal skill "ghost"/
+    );
+    // A path, not a name. Before this check both sides resolved outside the
+    // skills directories entirely.
+    for (const skill of ['../evil', '../../evil', 'nested/skill', '.hidden', '']) {
+      await assert.rejects(
+        () => setSkillDirectoryEnabled({ skill, enabled: false }),
+        /is not a plain skill directory name/,
+        skill
+      );
+    }
+    await assert.rejects(
+      () => setSkillDirectoryEnabled({ skill: 'github:gh-fix-ci', enabled: false }),
+      /is a plugin skill/
+    );
+    // Nothing above touched disk.
+    assert.equal(await isDir(path.join(fixture.codex, 'skills', 'alpha')), true);
+    assert.equal(await isDir(path.join(fixture.home, 'evil')), false);
+
+    await mkdir(path.join(fixture.codex, 'skills.disabled', 'alpha'), { recursive: true });
+    await assert.rejects(
+      () => setSkillDirectoryEnabled({ skill: 'alpha', enabled: false }),
+      /exists in both/
+    );
   });
 });
 
@@ -558,6 +759,41 @@ test('a missing codex binary names the config file to edit by hand', async () =>
         return true;
       }
     );
+  });
+});
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test('a hanging codex invocation is killed, not left running', async () => {
+  await withFixture(async (fixture) => {
+    const pidFile = path.join(fixture.home, 'child.pid');
+    const bin = path.join(fixture.home, 'codex-hangs.cjs');
+    await write(
+      bin,
+      [
+        '#!/usr/bin/env node',
+        `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+        'setInterval(() => {}, 1000);'
+      ].join('\n')
+    );
+    await chmod(bin, 0o755);
+    process.env.YARD_CODEX_BIN = bin;
+
+    await assert.rejects(() => removeMcpServer('slow', { timeoutMs: 250 }), /failed/);
+
+    const pid = Number(await readFile(pidFile, 'utf8'));
+    assert.ok(pid > 0);
+    for (let attempt = 0; attempt < 40 && alive(pid); attempt += 1) {
+      await delay(25);
+    }
+    assert.equal(alive(pid), false, `codex child ${pid} outlived its timeout`);
   });
 });
 

@@ -135,6 +135,10 @@ async function buildInstall(fixture: Fixture): Promise<void> {
     path.join(fixture.pluginRoot, 'skills', 'deploy', 'SKILL.md'),
     skill('deploy', 'Deploys things.')
   );
+  await write(
+    path.join(fixture.pluginRoot, 'skills', 'alpha', 'SKILL.md'),
+    skill('alpha', 'Shares a name with a personal skill.')
+  );
   await write(path.join(fixture.pluginRoot, 'agents', 'helper.md'), skill('helper', 'Helps.'));
   await writeJson(path.join(fixture.pluginRoot, 'hooks', 'hooks.json'), {
     hooks: { PostToolUse: [{ hooks: [{ type: 'command', command: 'format.sh' }] }] }
@@ -156,15 +160,61 @@ test('hook event names cover the PascalCase 2026 set', () => {
 test('settings files resolve in increasing precedence', async () => {
   await withFixture(async (fixture) => {
     const files = claudeSettingsFiles(fixture.project).map((entry) => entry.level);
-    assert.deepEqual(files, ['managed', 'user', 'project', 'userLocal', 'projectLocal']);
+    // Managed policy is last because it is the layer nothing local can override.
+    assert.deepEqual(files, ['user', 'userLocal', 'project', 'projectLocal', 'managed']);
     assert.equal(
       claudeSettingsTarget('user', fixture.project),
       path.join(fixture.home, '.claude', 'settings.json')
     );
     assert.equal(
+      claudeSettingsTarget('project', fixture.project),
+      path.join(fixture.project, '.claude', 'settings.json')
+    );
+    assert.equal(
       claudeSettingsTarget('local', fixture.project),
       path.join(fixture.project, '.claude', 'settings.local.json')
     );
+  });
+});
+
+test('a higher layer wins key by key, and says which file decided it', async () => {
+  await withFixture(async (fixture) => {
+    const userSettings = path.join(fixture.home, '.claude', 'settings.json');
+    const userLocal = path.join(fixture.home, '.claude', 'settings.local.json');
+    const projectSettings = path.join(fixture.project, '.claude', 'settings.json');
+    const projectLocal = path.join(fixture.project, '.claude', 'settings.local.json');
+
+    await writeJson(userSettings, {
+      skillListingMaxDescChars: 100,
+      skillListingBudgetFraction: 0.5,
+      skillOverrides: { alpha: 'off', beta: 'off' },
+      enabledPlugins: { 'one@acme': true, 'two@acme': true }
+    });
+    await writeJson(userLocal, { skillListingMaxDescChars: 200 });
+    await writeJson(projectSettings, {
+      skillListingMaxDescChars: 300,
+      skillOverrides: { alpha: 'name-only' }
+    });
+    await writeJson(projectLocal, {
+      skillListingMaxDescChars: 400,
+      enabledPlugins: { 'one@acme': false }
+    });
+
+    const { settings } = await scanClaude(fixture.project);
+
+    assert.equal(settings.skillListingMaxDescChars, 400);
+    assert.equal(settings.sources.skillListingMaxDescChars, projectLocal);
+    // A key only the lowest layer sets survives the merge.
+    assert.equal(settings.skillListingBudgetFraction, 0.5);
+    assert.equal(settings.sources.skillListingBudgetFraction, userSettings);
+
+    assert.deepEqual(settings.skillOverrides, { alpha: 'name-only', beta: 'off' });
+    assert.equal(settings.sources.skillOverrides.alpha, projectSettings);
+    assert.equal(settings.sources.skillOverrides.beta, userSettings);
+
+    assert.deepEqual(settings.enabledPlugins, { 'one@acme': false, 'two@acme': true });
+    assert.equal(settings.sources.enabledPlugins['one@acme'], projectLocal);
+    assert.deepEqual(settings.loaded, [userSettings, userLocal, projectSettings, projectLocal]);
   });
 });
 
@@ -200,8 +250,16 @@ test('scans a populated install', async () => {
     assert.equal(deploy.scope, 'plugin');
     assert.equal(deploy.qualifiedName, 'demo:deploy');
     assert.equal(deploy.plugin, 'demo');
-    // skillOverrides never reaches plugin skills, even with a matching key.
-    assert.equal(deploy.visibility, 'on');
+    // A plugin skill is keyed `<plugin>:<skill>` in skillOverrides.
+    assert.equal(deploy.visibility, 'off');
+    assert.equal(deploy.visibilitySource, path.join(fixture.home, '.claude', 'settings.json'));
+
+    // ...and only by that key: the bare-name override for the personal skill
+    // `alpha` must not reach the plugin's own skill of the same name.
+    const pluginAlpha = scan.skills.find((entry) => entry.id === 'claude:plugin:demo:alpha');
+    assert.ok(pluginAlpha);
+    assert.equal(pluginAlpha.visibility, 'on');
+    assert.equal(pluginAlpha.visibilitySource, undefined);
 
     assert.equal(scan.settings.skillListingMaxDescChars, 800);
     assert.equal(scan.settings.skillListingBudgetFraction, 0.01);
@@ -224,7 +282,7 @@ test('scans a populated install', async () => {
     assert.equal(plugin.root, fixture.pluginRoot);
     assert.deepEqual(
       [plugin.skills, plugin.hooks, plugin.mcpServers],
-      [1, 1, 1]
+      [2, 1, 1]
     );
 
     const approved = scan.mcpServers.find((entry) => entry.name === 'approved');

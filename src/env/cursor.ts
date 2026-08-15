@@ -4,11 +4,12 @@ import { backupDir, cursorPaths } from './client-paths.js';
 import { collectSkillDirs } from './skill-dirs.js';
 import type { WriteResult } from './safe-io.js';
 import {
+  exists,
   isDir,
   isFile,
   listDirs,
   listFiles,
-  readJsonChecked,
+  parseJsonc,
   readText,
   writeJsonSafely
 } from './safe-io.js';
@@ -208,11 +209,14 @@ export async function setMcpServerEnabled(opts: {
 }): Promise<WriteResult> {
   const paths = cursorPaths(opts.projectRoot);
   const file = opts.scope === 'user' ? paths.userMcp : paths.projectMcp;
-  const parsed = await readJsonChecked<unknown>(file);
+  const parsed = await readJsonFile(file);
   if (parsed.error !== undefined) {
     // Refuse rather than overwrite: rewriting an unparseable file would destroy
     // configuration Yard cannot see.
     throw new Error(`cursor mcp.json is not valid JSON (${file}): ${parsed.error}`);
+  }
+  if (parsed.unreadable) {
+    throw new Error(`cursor mcp.json exists but cannot be read (${file})`);
   }
 
   const root = asRecord(parsed.value) ?? {};
@@ -435,8 +439,12 @@ async function readPluginHooksFile(
 }
 
 async function readEventMap(file: string, warnings: ScanWarning[]): Promise<Record<string, unknown>> {
-  const parsed = await readJsonChecked<unknown>(file);
+  const parsed = await readJsonFile(file);
   if (parsed.missing) {
+    return {};
+  }
+  if (parsed.unreadable) {
+    warnings.push({ client: CLIENT, file, message: 'unreadable' });
     return {};
   }
   if (parsed.error !== undefined) {
@@ -446,7 +454,9 @@ async function readEventMap(file: string, warnings: ScanWarning[]): Promise<Reco
   const root = asRecord(parsed.value);
   const events = asRecord(root?.hooks);
   if (!events) {
-    warnings.push({ client: CLIENT, file, message: 'no "hooks" object' });
+    if (!isEmptyRecord(parsed.value)) {
+      warnings.push({ client: CLIENT, file, message: 'no "hooks" object' });
+    }
     return {};
   }
   return events;
@@ -476,8 +486,12 @@ function toHookEntries(
 }
 
 async function readMcpFile(file: string, scope: Scope, warnings: ScanWarning[]): Promise<McpEntry[]> {
-  const parsed = await readJsonChecked<unknown>(file);
+  const parsed = await readJsonFile(file);
   if (parsed.missing) {
+    return [];
+  }
+  if (parsed.unreadable) {
+    warnings.push({ client: CLIENT, file, message: 'unreadable' });
     return [];
   }
   if (parsed.error !== undefined) {
@@ -492,12 +506,32 @@ async function readMcpFile(file: string, scope: Scope, warnings: ScanWarning[]):
   const enabled = asRecord(root.mcpServers);
   const disabled = asRecord(root._disabledMcpServers);
   if (!enabled && !disabled) {
-    warnings.push({ client: CLIENT, file, message: 'no "mcpServers" object' });
+    if (Object.keys(root).length > 0) {
+      warnings.push({ client: CLIENT, file, message: 'no "mcpServers" object' });
+    }
     return [];
   }
+
+  // A hand-edited file can name the same server in both maps. Two entries
+  // sharing an id and disagreeing about `enabled` would make the inventory
+  // self-contradictory, and re-enabling would silently overwrite the live
+  // entry with the parked copy, so the live one wins and the clash is reported.
+  const parked: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(disabled ?? {})) {
+    if (enabled && name in enabled) {
+      warnings.push({
+        client: CLIENT,
+        file,
+        message: `mcp server ${name} is in both mcpServers and _disabledMcpServers; using the enabled entry`
+      });
+      continue;
+    }
+    parked[name] = value;
+  }
+
   return [
     ...mcpEntries(enabled ?? {}, file, scope, true, undefined, warnings),
-    ...mcpEntries(disabled ?? {}, file, scope, false, undefined, warnings)
+    ...mcpEntries(parked, file, scope, false, undefined, warnings)
   ];
 }
 
@@ -706,10 +740,14 @@ async function readPlugin(
   scan: CursorScan
 ): Promise<void> {
   const manifestFile = path.join(root, '.cursor-plugin', 'plugin.json');
-  const parsed = await readJsonChecked<unknown>(manifestFile);
+  const parsed = await readJsonFile(manifestFile);
   if (parsed.missing) {
     // The plugin cache also holds partial checkouts and staging directories.
     // Cursor ignores anything without a manifest, so there is nothing to report.
+    return;
+  }
+  if (parsed.unreadable) {
+    scan.warnings.push({ client: CLIENT, file: manifestFile, message: 'unreadable' });
     return;
   }
   if (parsed.error !== undefined) {
@@ -724,13 +762,23 @@ async function readPlugin(
 
   const name = typeof manifest.name === 'string' && manifest.name ? manifest.name : dirName;
 
-  const skills = await readSkillsDir(
-    path.join(root, 'skills'),
-    'plugin',
-    name,
-    scan.warnings,
-    await collectSkillDirs(root, manifest.skills)
-  );
+  // `collectSkillDirs` resolves declared paths against the plugin root without
+  // checking that they stay inside it, so `"skills": "../.."` would walk the
+  // user's home and index SKILL.md files that belong to no plugin. Filter the
+  // declared paths going in and the resolved directories coming out.
+  const declaredSkills = declaredSkillPaths(root, manifest.skills, manifestFile, scan.warnings);
+  const skillDirs = (await collectSkillDirs(root, declaredSkills)).filter((dir) => {
+    if (within(root, dir)) {
+      return true;
+    }
+    scan.warnings.push({
+      client: CLIENT,
+      file: manifestFile,
+      message: `skills path escapes the plugin root: ${dir}`
+    });
+    return false;
+  });
+  const skills = await readSkillsDir(path.join(root, 'skills'), 'plugin', name, scan.warnings, skillDirs);
   const agents: AgentEntry[] = [];
   for (const dir of manifestDirs(root, manifest.agents, 'agents', manifestFile, scan.warnings)) {
     agents.push(...(await readMarkdownDir(dir, 'plugin', 'agent', name, scan.warnings)));
@@ -788,7 +836,7 @@ function manifestDirs(
       continue;
     }
     const resolved = path.resolve(root, item);
-    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    if (!within(root, resolved)) {
       warnings.push({
         client: CLIENT,
         file: manifestFile,
@@ -799,6 +847,94 @@ function manifestDirs(
     out.push(resolved);
   }
   return out;
+}
+
+/**
+ * The `skills` counterpart of {@link manifestDirs}: same validation, but the
+ * declared paths are handed to `collectSkillDirs` rather than listed directly,
+ * because a plugin may group its skills into category folders. Returning
+ * `undefined` leaves `collectSkillDirs` on its default (`<root>/skills`).
+ */
+function declaredSkillPaths(
+  root: string,
+  value: unknown,
+  manifestFile: string,
+  warnings: ScanWarning[]
+): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const items = Array.isArray(value) ? value : [value];
+  const out: string[] = [];
+  for (const item of items) {
+    if (typeof item !== 'string' || !item) {
+      warnings.push({ client: CLIENT, file: manifestFile, message: 'skills entry is not a path' });
+      continue;
+    }
+    if (!within(root, path.resolve(root, item))) {
+      warnings.push({
+        client: CLIENT,
+        file: manifestFile,
+        message: `skills path escapes the plugin root: ${item}`
+      });
+      continue;
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+type JsonRead = { value?: unknown; error?: string; missing: boolean; unreadable: boolean };
+
+/**
+ * Read a JSON config the way the clients themselves do.
+ *
+ * Three cases the shared `readJsonChecked` cannot express, each of which was
+ * losing real configuration:
+ *
+ *  - A byte-order mark. Editors on Windows write one, Cursor tolerates it, and
+ *    `JSON.parse` does not — so one invisible byte would blank a whole mcp.json.
+ *  - A blank file. `touch mcp.json` or a crashed writer leaves zero bytes; there
+ *    is no configuration in it to report or to lose, so it reads as `{}`.
+ *  - A file that exists but cannot be read (mode 000, a directory in its place,
+ *    a symlink loop). `readText` swallows all of those into `undefined`, which
+ *    is indistinguishable from "not configured" — the scan would show nothing
+ *    and say nothing.
+ */
+async function readJsonFile(file: string): Promise<JsonRead> {
+  const raw = await readText(file);
+  if (raw === undefined) {
+    return (await exists(file))
+      ? { missing: false, unreadable: true }
+      : { missing: true, unreadable: false };
+  }
+  const text = stripBom(raw);
+  if (text.trim() === '') {
+    return { value: {}, missing: false, unreadable: false };
+  }
+  try {
+    return { value: parseJsonc<unknown>(text), missing: false, unreadable: false };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+      missing: false,
+      unreadable: false
+    };
+  }
+}
+
+function stripBom(raw: string): string {
+  return raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+}
+
+/** True when `target` is the plugin root itself or sits underneath it. */
+function within(root: string, target: string): boolean {
+  return target === root || target.startsWith(root + path.sep);
+}
+
+function isEmptyRecord(value: unknown): boolean {
+  const record = asRecord(value);
+  return record !== undefined && Object.keys(record).length === 0;
 }
 
 function stringMap(value: unknown): Record<string, string> | undefined {

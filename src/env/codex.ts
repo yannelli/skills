@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
-import { mkdir, rename } from 'node:fs/promises';
+import { mkdir, readdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { parseFrontmatter } from '../frontmatter.js';
 import { codexPaths } from './client-paths.js';
 import { collectSkillDirs } from './skill-dirs.js';
-import { isDir, isFile, listDirs, readJsonChecked, readText } from './safe-io.js';
+import { exists, isDir, isFile, listDirs, readJsonChecked, readText } from './safe-io.js';
 import type {
   AgentEntry,
   CommandEntry,
@@ -85,7 +85,7 @@ export async function scanCodex(projectRoot: string): Promise<CodexScan> {
     ['user', paths.userMemory],
     ['project', paths.projectMemory]
   ] as const) {
-    const entry = await readMemory(file, scope);
+    const entry = await readMemory(file, scope, warn);
     if (entry) {
       memory.push(entry);
     }
@@ -108,8 +108,23 @@ export async function scanCodex(projectRoot: string): Promise<CodexScan> {
 
 type Warn = (file: string, message: string) => void;
 
-async function readConfig(file: string, warn: Warn): Promise<Record<string, unknown>> {
+/**
+ * Read a file, telling "not there" apart from "there but unreadable".
+ *
+ * A config the developer cannot read — wrong permissions, or a directory where
+ * a file belongs — must not look identical to one they never wrote, or Yard
+ * reports an empty inventory for a machine that is merely misconfigured.
+ */
+async function readTextChecked(file: string, warn: Warn): Promise<string | undefined> {
   const raw = await readText(file);
+  if (raw === undefined && (await exists(file))) {
+    warn(file, 'exists but could not be read as a file (permissions, or a directory?)');
+  }
+  return raw;
+}
+
+async function readConfig(file: string, warn: Warn): Promise<Record<string, unknown>> {
+  const raw = await readTextChecked(file, warn);
   if (raw === undefined) {
     return {};
   }
@@ -126,8 +141,12 @@ function configMcpServers(
   file: string,
   warn: Warn
 ): McpEntry[] {
-  const servers = asTable(config['mcp_servers']);
+  const declared = config['mcp_servers'];
+  const servers = asTable(declared);
   if (!servers) {
+    if (declared !== undefined) {
+      warn(file, 'mcp_servers is not a table');
+    }
     return [];
   }
   const entries: McpEntry[] = [];
@@ -211,10 +230,17 @@ async function readHookFile(
   file: string,
   scope: Scope,
   plugin: string | undefined,
-  warn: Warn
+  warn: Warn,
+  /** True when a manifest named this file, so its absence is worth reporting. */
+  required = false
 ): Promise<HookEntry[]> {
   const read = await readJsonChecked<HookFile>(file);
   if (read.missing) {
+    if (await exists(file)) {
+      warn(file, 'exists but could not be read as a file (permissions, or a directory?)');
+    } else if (required) {
+      warn(file, 'referenced by the plugin manifest but missing');
+    }
     return [];
   }
   if (read.error !== undefined || !read.value) {
@@ -301,7 +327,7 @@ async function readSkillTree(
   const entries: SkillEntry[] = [];
   // Plugins may declare nested or out-of-tree skill paths, in which case the
   // caller resolves them and passes the directories in directly.
-  const dirs = skillDirs ?? (await listDirs(root)).map((name) => path.join(root, name));
+  const dirs = skillDirs ?? (await listSkillDirs(root, warn));
   for (const skillDir of dirs) {
     const name = path.basename(skillDir);
     // `.system` and friends hold Codex's own skills, scanned separately.
@@ -319,6 +345,45 @@ async function readSkillTree(
     }
   }
   return entries;
+}
+
+/**
+ * Skill directories under `root`, symlinks included.
+ *
+ * `readdir` reports a symlink as a link and never as a directory, yet
+ * symlinking a shared skill into `~/.codex/skills` is a normal thing to do and
+ * Codex loads those skills like any other. Filtering on `isDirectory()` alone
+ * drops them from the inventory, and hides a link whose target has gone.
+ */
+async function listSkillDirs(root: string, warn: Warn): Promise<string[]> {
+  let names: { name: string; link: boolean }[];
+  try {
+    names = (await readdir(root, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => ({ name: entry.name, link: !entry.isDirectory() }));
+  } catch {
+    return [];
+  }
+  names.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+  const dirs: string[] = [];
+  for (const entry of names) {
+    // `.system` and friends hold Codex's own skills, scanned separately.
+    if (entry.name.startsWith('.')) {
+      continue;
+    }
+    const dir = path.join(root, entry.name);
+    if (!entry.link) {
+      dirs.push(dir);
+      continue;
+    }
+    if (await isDir(dir)) {
+      dirs.push(dir);
+      continue;
+    }
+    warn(dir, 'skill symlink does not resolve to a directory');
+  }
+  return dirs;
 }
 
 async function readSkill(
@@ -354,8 +419,8 @@ async function readSkill(
   };
 }
 
-async function readMemory(file: string, scope: Scope): Promise<MemoryEntry | undefined> {
-  const raw = await readText(file);
+async function readMemory(file: string, scope: Scope, warn: Warn): Promise<MemoryEntry | undefined> {
+  const raw = await readTextChecked(file, warn);
   if (raw === undefined) {
     return undefined;
   }
@@ -399,18 +464,44 @@ async function scanPlugins(
     const marketplaceDir = path.join(cacheDir, marketplace);
     const installed = new Set<string>();
 
-    for (const name of await listDirs(marketplaceDir)) {
-      const root = await resolvePluginRoot(path.join(marketplaceDir, name));
+    for (const dirName of await listDirs(marketplaceDir)) {
+      const root = await resolvePluginRoot(path.join(marketplaceDir, dirName));
       if (!root) {
         continue;
       }
-      installed.add(name);
-      plugins.push(await readPlugin(root, name, marketplace, collected, warn));
+      const entry = await readPlugin(root, dirName, marketplace, collected, warn);
+      // The manifest may name the plugin something other than its cache
+      // directory. Both spellings count as installed, or the marketplace pass
+      // below lists the same plugin a second time under a colliding id.
+      installed.add(dirName);
+      installed.add(entry.name);
+      plugins.push(entry);
     }
 
     plugins.push(...(await declaredPlugins(marketplaceDir, marketplace, installed, warn)));
   }
-  return plugins;
+
+  const seen = new Set<string>();
+  return plugins.map((plugin) => {
+    const id = uniquePluginId(plugin.id, plugin.marketplace ?? '', seen);
+    return id === plugin.id ? plugin : { ...plugin, id };
+  });
+}
+
+/**
+ * Two marketplaces can offer a plugin under the same name, so `id` is
+ * qualified with the marketplace when — and only when — it would otherwise
+ * repeat. Anything that indexes the inventory by id would silently lose the
+ * second entry.
+ */
+function uniquePluginId(base: string, marketplace: string, seen: Set<string>): string {
+  const qualified = `${base}@${marketplace}`;
+  let id = seen.has(base) ? qualified : base;
+  for (let n = 2; seen.has(id); n += 1) {
+    id = `${qualified}#${n}`;
+  }
+  seen.add(id);
+  return id;
 }
 
 /**
@@ -443,7 +534,10 @@ async function readPlugin(
   if (read.error !== undefined) {
     warn(manifestFile, `could not parse JSON: ${read.error}`);
   }
-  const manifest = read.value ?? {};
+  if (read.value !== undefined && !isTable(read.value)) {
+    warn(manifestFile, 'plugin manifest is not an object');
+  }
+  const manifest: PluginManifest = isTable(read.value) ? read.value : {};
   const name = asString(manifest.name) ?? dirName;
 
   const skills = await readSkillTree(
@@ -453,7 +547,7 @@ async function readPlugin(
     undefined,
     warn,
     name,
-    await collectSkillDirs(root, manifest.skills)
+    await collectSkillDirs(root, containedRefs(root, manifest.skills, manifestFile, warn))
   );
   const mcpServers = await pluginMcpServers(root, manifest, name, warn);
   const hooks = await pluginHooks(root, manifest, name, warn);
@@ -478,6 +572,38 @@ async function readPlugin(
     hooks: hooks.length,
     mcpServers: mcpServers.length
   };
+}
+
+/**
+ * A plugin manifest is data Yard did not write, so the paths inside it are
+ * untrusted: `"skills": "/etc"` or `"../../.."` must not turn a scan of one
+ * plugin into a walk of the developer's disk. Anything resolving outside the
+ * plugin root is dropped with a warning.
+ */
+function containedPath(root: string, relative: string): string | undefined {
+  const resolved = path.resolve(root, relative);
+  const rel = path.relative(root, resolved);
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    return undefined;
+  }
+  return resolved;
+}
+
+/** The declared skill paths that stay inside the plugin, in manifest order. */
+function containedRefs(root: string, declared: unknown, file: string, warn: Warn): string[] {
+  const raw = typeof declared === 'string' ? [declared] : Array.isArray(declared) ? declared : [];
+  const kept: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string') {
+      continue;
+    }
+    if (containedPath(root, entry) === undefined) {
+      warn(file, `skills path "${entry}" points outside the plugin directory`);
+      continue;
+    }
+    kept.push(entry);
+  }
+  return kept;
 }
 
 /** `mcpServers` is normally a path to a sibling `.mcp.json`, but may be inline. */
@@ -532,12 +658,19 @@ async function pluginHooks(
   plugin: string,
   warn: Warn
 ): Promise<HookEntry[]> {
+  const manifestFile = path.join(root, PLUGIN_MANIFEST);
   const inline = asTable(manifest.hooks);
   if (inline) {
     const events = asTable(inline['hooks']) ?? inline;
-    return hookEntries(events, path.join(root, PLUGIN_MANIFEST), 'plugin', plugin, warn);
+    return hookEntries(events, manifestFile, 'plugin', plugin, warn);
   }
-  return readHookFile(path.resolve(root, asString(manifest.hooks) ?? 'hooks.json'), 'plugin', plugin, warn);
+  const declared = asString(manifest.hooks);
+  const file = containedPath(root, declared ?? 'hooks.json');
+  if (file === undefined) {
+    warn(manifestFile, `hooks path "${declared ?? ''}" points outside the plugin directory`);
+    return [];
+  }
+  return readHookFile(file, 'plugin', plugin, warn, declared !== undefined);
 }
 
 type ManifestRef<T> = { file: string; value: T };
@@ -554,10 +687,19 @@ async function resolveManifestRef<T extends object>(
   if (relative === undefined) {
     return undefined;
   }
-  const file = path.resolve(root, relative);
+  const file = containedPath(root, relative);
+  if (file === undefined) {
+    warn(path.join(root, PLUGIN_MANIFEST), `"${relative}" points outside the plugin directory`);
+    return undefined;
+  }
   const read = await readJsonChecked<T>(file);
   if (read.missing) {
-    warn(file, 'referenced by the plugin manifest but missing');
+    warn(
+      file,
+      (await exists(file))
+        ? 'exists but could not be read as a file (permissions, or a directory?)'
+        : 'referenced by the plugin manifest but missing'
+    );
     return undefined;
   }
   if (read.error !== undefined || !read.value) {
@@ -618,7 +760,9 @@ async function declaredPlugins(
 /**
  * Codex disables a skill the same way Claude does: by moving its directory to
  * `skills.disabled`. `moved` reports an actual rename, so it is false on a dry
- * run and when the skill is already where it was asked to be.
+ * run and when the skill is already where it was asked to be. A skill that is
+ * not there is an error rather than a silent success, so a typo cannot be
+ * mistaken for a disabled skill.
  */
 export async function setSkillDirectoryEnabled(opts: {
   skill: string;
@@ -626,12 +770,44 @@ export async function setSkillDirectoryEnabled(opts: {
   dryRun?: boolean;
 }): Promise<{ from: string; to: string; moved: boolean }> {
   const paths = codexPaths(process.cwd());
+  if (opts.skill.includes(':')) {
+    throw new Error(
+      `"${opts.skill}" is a plugin skill; it lives in the plugin cache, not under ${paths.userSkills}`
+    );
+  }
+  // A rename is the one write this module makes, so the name it is given may
+  // only ever be a single directory below the skills paths — never a path.
+  if (
+    opts.skill === '' ||
+    opts.skill.startsWith('.') ||
+    opts.skill.includes('/') ||
+    opts.skill.includes('\\')
+  ) {
+    throw new Error(`"${opts.skill}" is not a plain skill directory name`);
+  }
+
   const enabledDir = path.join(paths.userSkills, opts.skill);
   const disabledDir = path.join(paths.userSkillsDisabled, opts.skill);
+  const inEnabled = await isDir(enabledDir);
+  const inDisabled = await isDir(disabledDir);
+
+  if (inEnabled && inDisabled) {
+    throw new Error(
+      `"${opts.skill}" exists in both ${paths.userSkills} and ${paths.userSkillsDisabled}; resolve that by hand first`
+    );
+  }
+  if (!inEnabled && !inDisabled) {
+    throw new Error(
+      `no personal skill "${opts.skill}" under ${paths.userSkills} or ${paths.userSkillsDisabled}`
+    );
+  }
+
   const from = opts.enabled ? disabledDir : enabledDir;
   const to = opts.enabled ? enabledDir : disabledDir;
-
-  if (opts.dryRun || !(await isDir(from)) || (await isDir(to))) {
+  if (opts.enabled ? inEnabled : inDisabled) {
+    return { from: to, to, moved: false };
+  }
+  if (opts.dryRun) {
     return { from, to, moved: false };
   }
 

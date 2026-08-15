@@ -18,7 +18,7 @@
     "build:web": "npm --prefix web run build",
     "dev:web": "npm --prefix web run dev",
     "validate": "node scripts/validate.mjs",
-    "test": "tsx --test src/*.test.ts",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit && npm --prefix web run typecheck"
   },
   "dependencies": {
