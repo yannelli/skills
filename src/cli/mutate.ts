@@ -80,7 +80,7 @@ export function reportAction(result: ActionResult, options: MutationOptions): nu
     console.log(style.dim('dry run, nothing was written'));
   }
   console.log(result.detail);
-  if (result.file) {
+  if (result.file && !result.detail.includes(result.file)) {
     console.log(style.dim(`file    ${shortenPath(result.file, options.projectRoot)}`));
   }
   if (result.backup) {

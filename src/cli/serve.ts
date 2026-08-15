@@ -38,9 +38,19 @@ export async function runServe(options: ServeOptions = {}): Promise<number> {
     watch(REPO_ROOT, { recursive: false }, () => catalog.invalidate());
   }
 
-  serve({ fetch: app.fetch, hostname: '127.0.0.1', port: options.port ?? DEFAULT_PORT }, (info) => {
+  const port = options.port ?? DEFAULT_PORT;
+  const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port }, (info) => {
     console.error(`yard  http://127.0.0.1:${info.port}`);
     console.error(`mcp   http://127.0.0.1:${info.port}/mcp`);
+  });
+
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    // A taken port is someone else's yard, not a bug worth a stack trace.
+    if (error.code === 'EADDRINUSE') {
+      process.stderr.write(`yard: port ${port} is already in use — pass --port=<port>\n`);
+      process.exit(1);
+    }
+    throw error;
   });
 
   const shutdown = async (): Promise<void> => {

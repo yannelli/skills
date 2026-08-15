@@ -15,6 +15,28 @@ export function isEnvKind(value: string): value is EnvKind {
   return (ENV_KINDS as readonly string[]).includes(value);
 }
 
+/**
+ * The CLI and the docs say `--kind=skill`, this module says `skills`. Rather
+ * than make callers remember which surface pluralises, accept either and
+ * normalise, so a request that reads correctly is never a 400.
+ */
+const KIND_ALIASES: Record<string, EnvKind> = {
+  skill: 'skills',
+  plugin: 'plugins',
+  mcpServers: 'mcp',
+  hook: 'hooks',
+  agent: 'agents',
+  command: 'commands',
+  memories: 'memory'
+};
+
+export function toEnvKind(value: string): EnvKind | undefined {
+  if (isEnvKind(value)) {
+    return value;
+  }
+  return KIND_ALIASES[value];
+}
+
 export function countInventory(inventory: Inventory): Record<EnvKind, number> {
   return {
     skills: inventory.skills.length,

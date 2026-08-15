@@ -3,7 +3,6 @@ const USAGE = `yard — one control plane for claude code, codex, and cursor
 usage: yard <command> [options]
 
   scan                          what every client will load: counts, then the inventory
-    --client=claude|codex|cursor
     --kind=skill|plugin|mcp|hook|agent|command|memory
   context [--probe]             what your setup costs in context, per turn, and what to turn off
   doctor [--probe]              what is quietly broken. exits 1 when anything is an error
@@ -19,10 +18,10 @@ usage: yard <command> [options]
 options everywhere:
   --json                        machine output, no colour
   --project=<path>              project to scan, defaults to the working directory
+  --client=claude|codex|cursor  one client only, and the one to write to when a name is ambiguous
 
 mutating commands also take:
   --dry-run                     print what would change, write nothing
-  --client=<client>             which client to write to, when a name is ambiguous
   --scope=user|project|local    which settings file to write, defaults to user
 
 legacy flags, unchanged:

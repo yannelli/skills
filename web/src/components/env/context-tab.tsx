@@ -51,10 +51,11 @@ export function ContextTab({ resource, probe, onMeasure, onChanged }: ContextTab
   const action = useAction(onChanged)
   const report = resource.data
 
-  const unmeasuredMcp = useMemo(
-    () => (report?.lines ?? []).filter((line) => line.kind === 'mcp' && !line.measured),
+  const mcpLines = useMemo(
+    () => (report?.lines ?? []).filter((line) => line.kind === 'mcp'),
     [report]
   )
+  const unmeasured = mcpLines.filter((line) => !line.measured).length
 
   if (!report) {
     if (resource.error) {
@@ -83,9 +84,14 @@ export function ContextTab({ resource, probe, onMeasure, onChanged }: ContextTab
           <CardAction>
             <Button
               type="button"
-              variant={report.probed ? 'outline' : 'default'}
+              variant={report.probed || !mcpLines.length ? 'outline' : 'default'}
               size="sm"
-              disabled={measuring}
+              disabled={measuring || mcpLines.length === 0}
+              title={
+                mcpLines.length
+                  ? 'starts each enabled MCP server on this machine and reads its tool list'
+                  : 'no MCP servers are configured, so there is nothing to start'
+              }
               onClick={onMeasure}
             >
               {measuring ? <Loader2 className="animate-spin" /> : <Gauge />}
@@ -104,7 +110,8 @@ export function ContextTab({ resource, probe, onMeasure, onChanged }: ContextTab
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
-            {report.total.toLocaleString()} tokens across {report.lines.length} items in{' '}
+            {report.total.toLocaleString()} tokens across {report.lines.length}{' '}
+            {report.lines.length === 1 ? 'item' : 'items'} in{' '}
             {report.clients.length ? report.clients.join(', ') : 'no detected client'} ·{' '}
             <span className="font-mono">{report.projectRoot}</span>
           </p>
@@ -112,16 +119,18 @@ export function ContextTab({ resource, probe, onMeasure, onChanged }: ContextTab
           <p className="text-xs text-muted-foreground">
             Every figure here is an estimate from Yard&rsquo;s own tokenizer approximation, not a
             billed count.{' '}
-            {report.probed
-              ? 'MCP servers were started and their real tool lists were read.'
-              : 'MCP servers were not started, so their cost is a flat placeholder.'}
+            {mcpLines.length === 0
+              ? 'No MCP servers are enabled, so nothing here is a placeholder.'
+              : unmeasured === 0
+                ? 'Every MCP server was started and its real tool list read.'
+                : `${unmeasured} of ${mcpLines.length} MCP servers were not measured, so their cost is a flat placeholder rather than their own schemas.`}
           </p>
 
-          {!report.probed && unmeasuredMcp.length ? (
+          {unmeasured ? (
             <p className="text-xs text-muted-foreground">
-              Measuring starts {unmeasuredMcp.length} configured MCP server
-              {unmeasuredMcp.length === 1 ? '' : 's'} on this machine — the same commands your client
-              runs — and asks each for its tool list. Nothing is started until you click.
+              Measuring starts {unmeasured} configured MCP server{unmeasured === 1 ? '' : 's'} on
+              this machine — the same commands your client runs — and asks each for its tool list.
+              Nothing is started until you click.
             </p>
           ) : null}
 

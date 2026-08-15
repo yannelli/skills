@@ -9,7 +9,7 @@ import {
   actionTarget,
   ENV_KINDS,
   filterInventory,
-  isEnvKind,
+  toEnvKind,
   type ActionTarget,
   type EnvKind
 } from './env-api.js';
@@ -389,10 +389,11 @@ function kindParam(value: string | undefined): EnvKind | undefined {
   if (!value) {
     return undefined;
   }
-  if (!isEnvKind(value)) {
+  const kind = toEnvKind(value);
+  if (!kind) {
     return badRequest(`kind must be one of ${ENV_KINDS.join(', ')}`);
   }
-  return value;
+  return kind;
 }
 
 /**

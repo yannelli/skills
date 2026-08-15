@@ -98,7 +98,9 @@ main().then(
     process.exitCode = code;
   },
   (error: unknown) => {
-    process.stderr.write(`yard: ${error instanceof Error ? error.message : String(error)}\n`);
+    const message = error instanceof Error ? error.message : String(error);
+    // A usage line already names the command, so it does not want a prefix.
+    process.stderr.write(message.startsWith('usage:') ? `${message}\n` : `yard: ${message}\n`);
     process.exitCode = 1;
   }
 );
