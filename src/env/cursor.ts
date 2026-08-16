@@ -424,7 +424,8 @@ async function readCursorHooksFile(
 async function readPluginHooksFile(
   file: string,
   plugin: string,
-  warnings: ScanWarning[]
+  warnings: ScanWarning[],
+  pluginRoot?: string
 ): Promise<HookEntry[]> {
   const events = await readEventMap(file, warnings);
   const out: HookEntry[] = [];
@@ -433,7 +434,7 @@ async function readPluginHooksFile(
     for (const problem of parsed.problems) {
       warnings.push({ client: CLIENT, file, message: `${event}: ${problem}` });
     }
-    out.push(...toHookEntries(event, parsed.defs, 'plugin', file, plugin));
+    out.push(...toHookEntries(event, parsed.defs, 'plugin', file, plugin, pluginRoot));
   }
   return out;
 }
@@ -467,7 +468,8 @@ function toHookEntries(
   defs: ParsedHook[],
   scope: Scope,
   file: string,
-  plugin: string | undefined
+  plugin: string | undefined,
+  pluginRoot?: string
 ): HookEntry[] {
   return defs.map((def, index) => ({
     id: `cursor:${scope}:${plugin ? `${plugin}:` : ''}${event}:${index}`,
@@ -481,13 +483,29 @@ function toHookEntries(
     index,
     ...(def.matcher !== undefined ? { matcher: def.matcher } : {}),
     ...(def.timeout !== undefined ? { timeout: def.timeout } : {}),
-    ...(plugin ? { plugin } : {})
+    ...(plugin ? { plugin } : {}),
+    ...(pluginRoot !== undefined ? { pluginRoot } : {})
   }));
 }
 
-async function readMcpFile(file: string, scope: Scope, warnings: ScanWarning[]): Promise<McpEntry[]> {
+type McpFileOptions = {
+  plugin?: string;
+  pluginRoot?: string;
+  /** True when a manifest named this file, so its absence is worth reporting. */
+  required?: boolean;
+};
+
+async function readMcpFile(
+  file: string,
+  scope: Scope,
+  warnings: ScanWarning[],
+  options: McpFileOptions = {}
+): Promise<McpEntry[]> {
   const parsed = await readJsonFile(file);
   if (parsed.missing) {
+    if (options.required) {
+      warnings.push({ client: CLIENT, file, message: 'referenced by the plugin manifest but missing' });
+    }
     return [];
   }
   if (parsed.unreadable) {
@@ -530,8 +548,8 @@ async function readMcpFile(file: string, scope: Scope, warnings: ScanWarning[]):
   }
 
   return [
-    ...mcpEntries(enabled ?? {}, file, scope, true, undefined, warnings),
-    ...mcpEntries(parked, file, scope, false, undefined, warnings)
+    ...mcpEntries(enabled ?? {}, file, scope, true, options.plugin, warnings, options.pluginRoot),
+    ...mcpEntries(parked, file, scope, false, options.plugin, warnings, options.pluginRoot)
   ];
 }
 
@@ -541,7 +559,8 @@ function mcpEntries(
   scope: Scope,
   enabled: boolean,
   plugin: string | undefined,
-  warnings: ScanWarning[]
+  warnings: ScanWarning[],
+  pluginRoot?: string
 ): McpEntry[] {
   const out: McpEntry[] = [];
   for (const [name, value] of Object.entries(servers)) {
@@ -568,9 +587,62 @@ function mcpEntries(
       ...(typeof record.url === 'string' ? { url: record.url } : {}),
       ...(headers ? { headers } : {}),
       ...(plugin ? { plugin } : {}),
+      ...(pluginRoot !== undefined ? { pluginRoot } : {}),
       // Cursor has no enabled flag; disabled servers are the ones Yard parked
       // under `_disabledMcpServers`, so the file itself is the source.
       ...(enabled ? {} : { enabledSource: file })
+    });
+  }
+  return out;
+}
+
+/**
+ * `mcpServers` in a Cursor plugin manifest can be a path to an external file,
+ * an inline server map, or an array mixing both. When the manifest is silent
+ * about it entirely, Cursor auto-discovers a sibling `mcp.json` at the plugin
+ * root — the same default every one of the official plugin-template's
+ * starter plugins relies on. Scanning only the inline-object case is what
+ * made every plugin using an external or sibling file read as contributing
+ * no MCP servers at all.
+ */
+async function pluginMcpServers(
+  root: string,
+  manifest: Record<string, unknown>,
+  manifestFile: string,
+  name: string,
+  warnings: ScanWarning[]
+): Promise<McpEntry[]> {
+  const declared = manifest.mcpServers;
+  if (declared === undefined || declared === null) {
+    return readMcpFile(path.join(root, 'mcp.json'), 'plugin', warnings, { plugin: name, pluginRoot: root });
+  }
+  const refs = Array.isArray(declared) ? declared : [declared];
+  const out: McpEntry[] = [];
+  for (const ref of refs) {
+    const inline = asRecord(ref);
+    if (inline) {
+      out.push(...mcpEntries(inline, manifestFile, 'plugin', true, name, warnings, root));
+      continue;
+    }
+    if (typeof ref === 'string') {
+      const file = containedPath(root, ref);
+      if (file === undefined) {
+        warnings.push({
+          client: CLIENT,
+          file: manifestFile,
+          message: `mcpServers path "${ref}" points outside the plugin directory`
+        });
+        continue;
+      }
+      out.push(
+        ...(await readMcpFile(file, 'plugin', warnings, { plugin: name, pluginRoot: root, required: true }))
+      );
+      continue;
+    }
+    warnings.push({
+      client: CLIENT,
+      file: manifestFile,
+      message: 'mcpServers entry is neither a path nor an object'
     });
   }
   return out;
@@ -788,11 +860,13 @@ async function readPlugin(
     commands.push(...(await readMarkdownDir(dir, 'plugin', 'command', name, scan.warnings)));
   }
 
-  const hooks = await readPluginHooksFile(path.join(root, 'hooks', 'hooks.json'), name, scan.warnings);
-  const inlineMcp = asRecord(manifest.mcpServers);
-  const mcpServers = inlineMcp
-    ? mcpEntries(inlineMcp, manifestFile, 'plugin', true, name, scan.warnings)
-    : [];
+  const hooks = await readPluginHooksFile(
+    path.join(root, 'hooks', 'hooks.json'),
+    name,
+    scan.warnings,
+    root
+  );
+  const mcpServers = await pluginMcpServers(root, manifest, manifestFile, name, scan.warnings);
 
   scan.skills.push(...skills);
   scan.agents.push(...agents);
@@ -930,6 +1004,16 @@ function stripBom(raw: string): string {
 /** True when `target` is the plugin root itself or sits underneath it. */
 function within(root: string, target: string): boolean {
   return target === root || target.startsWith(root + path.sep);
+}
+
+/**
+ * A plugin manifest is data Yard did not write, so `"mcpServers": "/etc/hosts"`
+ * or `"../../.."` must not turn a scan of one plugin into a walk of the
+ * developer's disk. Returns the resolved path only when it stays inside `root`.
+ */
+function containedPath(root: string, relative: string): string | undefined {
+  const resolved = path.resolve(root, relative);
+  return within(root, resolved) ? resolved : undefined;
 }
 
 function isEmptyRecord(value: unknown): boolean {

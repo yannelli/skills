@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
+import path from 'node:path';
+import { expandVariables, pathVariables } from './shell-words.js';
 import { estimateJsonTokens } from './tokens.js';
 import type { McpEntry } from './types.js';
 
@@ -32,6 +34,12 @@ export type ProbeResult = {
 export type ProbeOptions = {
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
+  /**
+   * The project a scan was rooted at, so a server's `${CLAUDE_PROJECT_DIR}` /
+   * `${PROJECT_ROOT}` resolve to something real instead of surviving into the
+   * spawned command as literal, unexpanded text.
+   */
+  projectRoot?: string;
 };
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
@@ -72,7 +80,7 @@ export async function probeMcpServer(entry: McpEntry, opts: ProbeOptions = {}): 
   const timeoutMs = positiveOr(opts.timeoutMs, DEFAULT_TIMEOUT_MS);
   // This function is the contract boundary: a probe reports failure, it never
   // rejects, so one hostile server cannot take down a whole scan.
-  const outcome = await runProbe(entry, timeoutMs, opts.env).catch(
+  const outcome = await runProbe(entry, timeoutMs, opts.env, opts.projectRoot).catch(
     (error: unknown): Outcome => ({ ok: false, error: messageOf(error), tools: [] })
   );
   const totalTokens = outcome.tools.reduce((sum, tool) => sum + tool.tokens, 0);
@@ -90,7 +98,7 @@ export async function probeMcpServer(entry: McpEntry, opts: ProbeOptions = {}): 
 
 export async function probeAll(
   entries: McpEntry[],
-  opts: { timeoutMs?: number; concurrency?: number } = {}
+  opts: { timeoutMs?: number; concurrency?: number; projectRoot?: string } = {}
 ): Promise<ProbeResult[]> {
   // `Math.trunc(NaN)` is NaN, and `Array.from({ length: NaN })` builds no
   // workers at all — which used to return an array of holes typed as results.
@@ -121,7 +129,8 @@ export async function probeAll(
         continue;
       }
       results[index] = await probeMcpServer(entry, {
-        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {})
+        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+        ...(opts.projectRoot !== undefined ? { projectRoot: opts.projectRoot } : {})
       }).catch((error: unknown) => ({
         id: entry.id,
         server: entry.name,
@@ -142,7 +151,8 @@ export async function probeAll(
 async function runProbe(
   entry: McpEntry,
   timeoutMs: number,
-  envOverride: NodeJS.ProcessEnv | undefined
+  envOverride: NodeJS.ProcessEnv | undefined,
+  projectRoot: string | undefined
 ): Promise<Outcome> {
   if (entry.transport !== 'stdio') {
     // Probing http/sse/ws means a real network connection with the user's
@@ -155,6 +165,8 @@ async function runProbe(
     return { ok: false, error: 'stdio server has no command', tools: [] };
   }
 
+  const launch = resolveLaunch(entry, projectRoot);
+
   const options: SpawnOptions = {
     // Never 'inherit': a server that reads stdin would swallow the parent's.
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -162,18 +174,100 @@ async function runProbe(
     // servers are usually launched through `npx`/`uvx`, which fork the real
     // server as a child; signalling only the launcher leaves that orphaned.
     detached: KILL_GROUP,
-    ...(entry.cwd ? { cwd: entry.cwd } : {}),
-    env: { ...process.env, ...entry.env, ...envOverride }
+    ...(launch.cwd !== undefined ? { cwd: launch.cwd } : {}),
+    env: { ...process.env, ...launch.env, ...envOverride }
   };
 
   let child: ChildProcess;
   try {
-    child = spawn(entry.command, entry.args ?? [], options);
+    child = spawn(launch.command, launch.args, options);
   } catch (error) {
     return { ok: false, error: messageOf(error), tools: [] };
   }
 
   return converse(child, timeoutMs);
+}
+
+type Launch = {
+  command: string;
+  args: string[];
+  cwd: string | undefined;
+  env: Record<string, string> | undefined;
+};
+
+/**
+ * Reproduce how the owning client actually launches a stdio server, not how
+ * Yard happens to be invoked.
+ *
+ * Two independent fixes live here. First, `${CLAUDE_PLUGIN_ROOT}` and
+ * `${CLAUDE_PROJECT_DIR}` (and their Codex/Cursor-flavoured aliases) are
+ * expanded in `command`, every arg, every env value, and `cwd` — without
+ * this, Node receives the literal text `${CLAUDE_PLUGIN_ROOT}/index.js` as a
+ * filename. Second, a relative `command` or `cwd` is resolved against the
+ * contributing plugin's root rather than left for the OS to resolve against
+ * wherever the Yard process happens to be running from — a plugin's `cwd: "."`
+ * means "my own directory", not "Yard's".
+ */
+function resolveLaunch(entry: McpEntry, projectRoot: string | undefined): Launch {
+  const vars = pathVariables({
+    ...(entry.pluginRoot ? { pluginRoot: entry.pluginRoot } : {}),
+    ...(projectRoot ? { projectRoot } : {})
+  });
+  const expand = (value: string): string => expandVariables(value, vars);
+
+  const command = expand(entry.command ?? '');
+  const resolvedCommand = resolveCommandPath(command, entry.pluginRoot);
+
+  const args = (entry.args ?? []).map(expand);
+
+  const env = entry.env ? mapValues(entry.env, expand) : undefined;
+
+  // No declared cwd on a plugin-scoped server defaults to the plugin's own
+  // directory, mirroring how a plugin's other relative paths (skills/, hooks/)
+  // are already resolved against its root rather than the project's.
+  const cwd = entry.cwd !== undefined ? expand(entry.cwd) : entry.pluginRoot;
+  const resolvedCwd = cwd !== undefined ? resolveCwdPath(cwd, entry.pluginRoot) : undefined;
+
+  return { command: resolvedCommand, args, cwd: resolvedCwd, env };
+}
+
+/**
+ * A bare executable name (`node`, `npx`) has no separator and must stay
+ * exactly as written so it is looked up on `PATH`, the same as before this
+ * function existed. Only a value that already looks like a path — and is not
+ * already absolute — is resolved, and only when a base to resolve it against
+ * is actually known.
+ */
+function resolveCommandPath(value: string, base: string | undefined): string {
+  if (base === undefined || value === '' || path.isAbsolute(value) || !/[/\\]/.test(value)) {
+    return value;
+  }
+  return path.resolve(base, value);
+}
+
+/**
+ * Unlike a command, `cwd` is never looked up on `PATH` — there is no bare
+ * word/relative-path distinction to make, so even `.` (a plugin manifest's
+ * usual way of saying "my own directory") must resolve against the plugin
+ * root. Reusing {@link resolveCommandPath}'s "only if it already looks like a
+ * path" rule here was the actual bug behind the report's `dataAnalyticsWidgets`
+ * and `yard` MCP probe failures: it left a bare `.` — no slash in it —
+ * untouched, so Node resolved it against wherever the Yard process happened
+ * to be running from instead of the plugin that declared it.
+ */
+function resolveCwdPath(value: string, base: string | undefined): string {
+  if (base === undefined || value === '' || path.isAbsolute(value)) {
+    return value;
+  }
+  return path.resolve(base, value);
+}
+
+function mapValues(record: Record<string, string>, fn: (value: string) => string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(record)) {
+    out[key] = fn(value);
+  }
+  return out;
 }
 
 async function converse(child: ChildProcess, timeoutMs: number): Promise<Outcome> {
@@ -504,9 +598,30 @@ function exitDescription(code: number | null, signal: NodeJS.Signals | null): st
   return 'server exited before responding';
 }
 
+/** How many trailing stderr lines to keep, on top of the preserved error line. */
+const STDERR_TAIL_LINES = 4;
+
+/**
+ * Node's own `MODULE_NOT_FOUND` dump puts the one line worth reading first —
+ * `Error: Cannot find module '/resolved/path.js'` — and then a require-stack
+ * and object-dump tail that says nothing a path did not already say. Keeping
+ * only the last few lines, as this used to, threw away the actionable line
+ * and kept the stack. The first line that looks like `Error: ...` is kept
+ * unconditionally; the tail still runs alongside it for servers that fail for
+ * some other reason and never print anything matching that shape.
+ */
 function withStderr(message: string, stderr: string): string {
-  const tail = stderr.trim().split('\n').slice(-5).join('\n').trim();
-  return tail ? `${message}: ${tail}` : message;
+  const lines = stderr
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return message;
+  }
+  const tail = lines.slice(-STDERR_TAIL_LINES);
+  const errorLine = lines.find((line) => line.includes('Error:'));
+  const kept = errorLine !== undefined && !tail.includes(errorLine) ? [errorLine, ...tail] : tail;
+  return `${message}: ${kept.join('\n')}`;
 }
 
 function rpcErrorText(error: { code?: unknown; message?: unknown }): string {

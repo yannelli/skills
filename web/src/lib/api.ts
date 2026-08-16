@@ -48,6 +48,7 @@ export type PluginEntry = {
   skills: number;
   hooks: number;
   mcpServers: number;
+  otherContributions?: number;
 };
 
 export type McpTransportKind = 'stdio' | 'http' | 'sse' | 'ws';
@@ -66,6 +67,7 @@ export type McpEntry = {
   headers?: Record<string, string>;
   file: string;
   plugin?: string;
+  pluginRoot?: string;
   enabled: boolean;
   enabledSource?: string;
 };
@@ -81,6 +83,7 @@ export type HookEntry = {
   timeout?: number;
   file: string;
   plugin?: string;
+  pluginRoot?: string;
   enabled: boolean;
   enabledSource?: string;
   index: number;
@@ -141,6 +144,13 @@ export type ContextLine = {
   measured: boolean;
   detail?: string;
   remedy?: string;
+  /**
+   * True when `remedy` is a `yard` command the action layer will actually
+   * carry out — false for a remedy that only names the client's own lever
+   * (a plugin's own enable/disable), which Yard has no API for and a button
+   * here would only fail against.
+   */
+  remedyActionable?: boolean;
 };
 
 export type ContextReport = {
@@ -234,6 +244,48 @@ export type AdaptReport = {
   registered: boolean;
 };
 
+/**
+ * Hand-mirrored from the client/origin action matrix in src/env/actions.ts
+ * (`skillActionBlocked` / `pluginActionBlocked` / `mcpActionBlocked`) — see
+ * that file for the reasoning behind each rule. Kept here so a control can be
+ * disabled *before* the click, with the same reason the server would give
+ * after it: the inventory table and the context table both call these
+ * rather than each guessing their own subset of the rules.
+ */
+export function skillActionBlocked(entry: Pick<SkillEntry, 'client' | 'scope' | 'plugin'>): string | undefined {
+  if (entry.scope === 'plugin') {
+    return `plugin skill — enable or disable the "${entry.plugin}" plugin instead of switching it alone`;
+  }
+  if (entry.client === 'cursor') {
+    return 'cursor has no skill visibility setting — move the directory by hand';
+  }
+  return undefined;
+}
+
+/** Only Claude Code stores plugin enablement in settings; Codex and Cursor treat install as enable. */
+export function pluginActionBlocked(entry: Pick<PluginEntry, 'client'>): string | undefined {
+  if (entry.client !== 'claude') {
+    return `only Claude Code stores plugin enablement in settings — use \`${entry.client} plugin add/remove\` instead`;
+  }
+  return undefined;
+}
+
+export function mcpActionBlocked(entry: Pick<McpEntry, 'client' | 'scope' | 'plugin'>): string | undefined {
+  if (entry.scope === 'plugin') {
+    if (entry.client === 'cursor') {
+      return `plugin-contributed MCP server — Cursor manages it through the "${entry.plugin}" plugin, not ~/.cursor/mcp.json`;
+    }
+    if (entry.client === 'codex') {
+      return `plugin-contributed MCP server, not a ~/.codex/config.toml entry — enable or disable the "${entry.plugin}" plugin instead`;
+    }
+    return undefined;
+  }
+  if (entry.client === 'codex') {
+    return 'codex owns config.toml — use `codex mcp add/remove` so its formatting survives';
+  }
+  return undefined;
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body && !headers.has('Content-Type')) {
@@ -280,34 +332,63 @@ export function fetchDoctor(probe: boolean): Promise<{ diagnoses: Diagnosis[] }>
 }
 
 /**
- * Every action takes the client the row came from. Names are not unique across
- * clients — the same plugin installed for Codex and Cursor gives two skills of
- * the same name, and one MCP server is commonly configured in all three — and
- * the API refuses a bare name it cannot resolve to one client rather than
- * guessing which config to edit. The UI always knows which row was clicked, so
- * it always says.
+ * Every action takes the `id` a scan already handed back on the row being
+ * changed, alongside the name and client it was resolved from. An id is
+ * unambiguous by construction and takes priority server-side; the name and
+ * client stay as the fallback the API has always accepted, and as what a
+ * human reads in the request body. Names are not unique across clients — the
+ * same plugin installed for Codex and Cursor gives two skills of the same
+ * name, and one MCP server is commonly configured in all three — so without
+ * an id the API refuses a bare name it cannot resolve to one client rather
+ * than guessing which config to edit.
  */
-export function setSkillVisibility(
-  skill: string,
-  visibility: SkillVisibility,
-  client?: Client
-): Promise<ActionResult> {
+export function setSkillVisibility(opts: {
+  id?: string;
+  skill: string;
+  visibility: SkillVisibility;
+  client?: Client;
+}): Promise<ActionResult> {
   return api<ActionResult>('/api/env/skill', {
     method: 'POST',
-    body: JSON.stringify({ skill, visibility, ...(client ? { client } : {}) })
+    body: JSON.stringify({
+      skill: opts.skill,
+      visibility: opts.visibility,
+      ...(opts.client ? { client: opts.client } : {}),
+      ...(opts.id ? { id: opts.id } : {})
+    })
   });
 }
 
-export function setPluginEnabled(plugin: string, enabled: boolean, client?: Client): Promise<ActionResult> {
+export function setPluginEnabled(opts: {
+  id?: string;
+  plugin: string;
+  enabled: boolean;
+  client?: Client;
+}): Promise<ActionResult> {
   return api<ActionResult>('/api/env/plugin', {
     method: 'POST',
-    body: JSON.stringify({ plugin, enabled, ...(client ? { client } : {}) })
+    body: JSON.stringify({
+      plugin: opts.plugin,
+      enabled: opts.enabled,
+      ...(opts.client ? { client: opts.client } : {}),
+      ...(opts.id ? { id: opts.id } : {})
+    })
   });
 }
 
-export function setMcpEnabled(server: string, enabled: boolean, client?: Client): Promise<ActionResult> {
+export function setMcpEnabled(opts: {
+  id?: string;
+  server: string;
+  enabled: boolean;
+  client?: Client;
+}): Promise<ActionResult> {
   return api<ActionResult>('/api/env/mcp', {
     method: 'POST',
-    body: JSON.stringify({ server, enabled, ...(client ? { client } : {}) })
+    body: JSON.stringify({
+      server: opts.server,
+      enabled: opts.enabled,
+      ...(opts.client ? { client: opts.client } : {}),
+      ...(opts.id ? { id: opts.id } : {})
+    })
   });
 }

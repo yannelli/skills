@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -424,6 +424,101 @@ test('the server is started with the environment and directory it was declared w
     'from-opts'
   );
   delete process.env.YARD_PROBE_AMBIENT;
+});
+
+/**
+ * Regression coverage for the report's `dataAnalyticsWidgets`/`yard` MCP
+ * false positives: a plugin declares its command/args/cwd/env the way it
+ * expects its *own* client to launch it — relative to the plugin, with
+ * `${CLAUDE_PLUGIN_ROOT}`/`${CLAUDE_PROJECT_DIR}` placeholders — and Yard has
+ * to reproduce that, not launch relative to wherever the Yard process
+ * happens to be running from.
+ */
+test('${CLAUDE_PLUGIN_ROOT} and ${CLAUDE_PROJECT_DIR} interpolate in args, env, and cwd before the server is spawned', async () => {
+  const pluginRoot = path.join(fixtureRoot, 'plugin-vars');
+  await mkdir(pluginRoot, { recursive: true });
+  await fixture('plugin-vars/env.mjs', ENV_SERVER);
+  const projectRoot = path.join(fixtureRoot, 'project-vars');
+  await mkdir(projectRoot, { recursive: true });
+
+  const entry: McpEntry = {
+    ...stdioEntry('env-vars', 'node', ['${CLAUDE_PLUGIN_ROOT}/env.mjs']),
+    pluginRoot,
+    env: { YARD_PROBE_MARK: '${CLAUDE_PROJECT_DIR}/marker' },
+    cwd: '${CLAUDE_PLUGIN_ROOT}'
+  };
+
+  const result = await probeMcpServer(entry, { timeoutMs: 5000, projectRoot });
+  // Reaching `ok: true` at all proves the arg was expanded first: node cannot
+  // run a file literally named "${CLAUDE_PLUGIN_ROOT}/env.mjs".
+  assert.equal(result.ok, true, result.error);
+  const byName = new Map(result.tools.map((tool) => [tool.name, tool.description]));
+  assert.equal(byName.get('cwd'), pluginRoot);
+  assert.equal(byName.get('mark'), `${projectRoot}/marker`);
+});
+
+test('a plugin-scoped server with no declared cwd starts in its own plugin root, not wherever yard is running from', async () => {
+  const pluginRoot = path.join(fixtureRoot, 'plugin-default-cwd');
+  await mkdir(pluginRoot, { recursive: true });
+  const file = await fixture('plugin-default-cwd/env.mjs', ENV_SERVER);
+  assert.notEqual(pluginRoot, process.cwd(), 'the test is meaningless if the plugin root already is the process cwd');
+
+  const entry: McpEntry = { ...stdioEntry('env-default-cwd', 'node', [file]), pluginRoot };
+  assert.equal(entry.cwd, undefined);
+
+  const result = await probeMcpServer(entry, { timeoutMs: 5000 });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.tools.find((tool) => tool.name === 'cwd')?.description, pluginRoot);
+});
+
+test('a plugin-scoped server\'s declared cwd "." resolves against the plugin root, not the process\'s own directory', async () => {
+  const pluginRoot = path.join(fixtureRoot, 'plugin-dot-cwd');
+  await mkdir(pluginRoot, { recursive: true });
+  const file = await fixture('plugin-dot-cwd/env.mjs', ENV_SERVER);
+
+  const entry: McpEntry = { ...stdioEntry('env-dot-cwd', 'node', [file]), pluginRoot, cwd: '.' };
+
+  const result = await probeMcpServer(entry, { timeoutMs: 5000 });
+  // Before this fix, "." has no path separator, so the same "only resolve a
+  // value that already looks like a path" rule that correctly leaves a bare
+  // *command* like `node` alone (so it is still looked up on PATH) also left
+  // "." alone, and Node fell back to resolving it against the actual process
+  // cwd instead of the plugin's.
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.tools.find((tool) => tool.name === 'cwd')?.description, pluginRoot);
+});
+
+test('a nested relative cwd resolves against the plugin root too', async () => {
+  const pluginRoot = path.join(fixtureRoot, 'plugin-nested-cwd');
+  const nested = path.join(pluginRoot, 'server');
+  await mkdir(nested, { recursive: true });
+  await fixture('plugin-nested-cwd/server/env.mjs', ENV_SERVER);
+
+  // A relative arg is left for node to resolve against the *spawned*
+  // process's cwd, so this only passes if the cwd above was itself resolved
+  // correctly — the same interaction a plugin shipping `cwd: "./server"` and
+  // a same-directory `args: ["env.mjs"]` relies on.
+  const entry: McpEntry = { ...stdioEntry('env-nested-cwd', 'node', ['env.mjs']), pluginRoot, cwd: './server' };
+
+  const result = await probeMcpServer(entry, { timeoutMs: 5000 });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.tools.find((tool) => tool.name === 'cwd')?.description, nested);
+});
+
+test('a plugin-scoped server whose command is itself a relative path resolves it against the plugin root', async () => {
+  const pluginRoot = path.join(fixtureRoot, 'plugin-rel-command');
+  await mkdir(pluginRoot, { recursive: true });
+  const script = path.join(pluginRoot, 'run.mjs');
+  await writeFile(script, `#!/usr/bin/env node\n${ENV_SERVER}`, 'utf8');
+  await chmod(script, 0o755);
+
+  // A bare `node`/`npx` must stay untouched (looked up on PATH) — this is the
+  // other half of that same rule, where the value does look like a path.
+  const entry: McpEntry = { ...stdioEntry('env-rel-command', './run.mjs', []), pluginRoot };
+
+  const result = await probeMcpServer(entry, { timeoutMs: 5000 });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.tools.find((tool) => tool.name === 'cwd')?.description, pluginRoot);
 });
 
 test('a server that floods stdout is bounded, not followed into the heap', async () => {

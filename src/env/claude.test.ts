@@ -250,9 +250,11 @@ test('scans a populated install', async () => {
     assert.equal(deploy.scope, 'plugin');
     assert.equal(deploy.qualifiedName, 'demo:deploy');
     assert.equal(deploy.plugin, 'demo');
-    // A plugin skill is keyed `<plugin>:<skill>` in skillOverrides.
-    assert.equal(deploy.visibility, 'off');
-    assert.equal(deploy.visibilitySource, path.join(fixture.home, '.claude', 'settings.json'));
+    // Claude Code does not apply skillOverrides to plugin skills, so the
+    // `demo:deploy` entry in settings.json is inert and the plugin's own
+    // (enabled) state is all that decides visibility.
+    assert.equal(deploy.visibility, 'on');
+    assert.equal(deploy.visibilitySource, undefined);
 
     // ...and only by that key: the bare-name override for the personal skill
     // `alpha` must not reach the plugin's own skill of the same name.
@@ -528,7 +530,7 @@ test('setMcpEnabled moves a server between the approval lists', async () => {
       disabledMcpjsonServers: ['gamma']
     });
 
-    await setMcpEnabled({ server: 'alpha', enabled: false, projectRoot: fixture.project });
+    await setMcpEnabled({ server: 'alpha', enabled: false, origin: 'project', projectRoot: fixture.project });
     let settings = await readJson<{
       enabledMcpjsonServers: string[];
       disabledMcpjsonServers: string[];
@@ -536,13 +538,13 @@ test('setMcpEnabled moves a server between the approval lists', async () => {
     assert.deepEqual(settings?.enabledMcpjsonServers, ['beta']);
     assert.deepEqual(settings?.disabledMcpjsonServers, ['alpha', 'gamma']);
 
-    await setMcpEnabled({ server: 'gamma', enabled: true, projectRoot: fixture.project });
-    await setMcpEnabled({ server: 'gamma', enabled: true, projectRoot: fixture.project });
+    await setMcpEnabled({ server: 'gamma', enabled: true, origin: 'project', projectRoot: fixture.project });
+    await setMcpEnabled({ server: 'gamma', enabled: true, origin: 'project', projectRoot: fixture.project });
     settings = await readJson(file);
     assert.deepEqual(settings?.enabledMcpjsonServers, ['beta', 'gamma']);
     assert.deepEqual(settings?.disabledMcpjsonServers, ['alpha']);
 
-    await setMcpEnabled({ server: 'alpha', enabled: true, projectRoot: fixture.project });
+    await setMcpEnabled({ server: 'alpha', enabled: true, origin: 'project', projectRoot: fixture.project });
     settings = await readJson(file);
     assert.equal(settings?.disabledMcpjsonServers, undefined);
   });
@@ -697,7 +699,7 @@ test('a symlink loop under commands terminates instead of hanging', async () => 
   });
 });
 
-test('plugin skill visibility follows the plugin-qualified key only', async () => {
+test('a plugin-qualified skillOverrides key is inert, matching Claude Code\'s own docs', async () => {
   await withFixture(async (fixture) => {
     await buildInstall(fixture);
     await writeJson(path.join(fixture.project, '.claude', 'settings.local.json'), {
@@ -706,11 +708,12 @@ test('plugin skill visibility follows the plugin-qualified key only', async () =
     const scan = await scanClaude(fixture.project);
     const deploy = scan.skills.find((entry) => entry.qualifiedName === 'demo:deploy');
     assert.ok(deploy);
-    assert.equal(deploy.visibility, 'name-only');
-    assert.equal(
-      deploy.visibilitySource,
-      path.join(fixture.project, '.claude', 'settings.local.json')
-    );
+    // Claude Code's settings reference is explicit: skillOverrides "does not
+    // apply to plugin skills, which are managed through /plugin". The
+    // override above is never read; the plugin's own enabled state is what
+    // decides visibility, so it stays fully on with no source file.
+    assert.equal(deploy.visibility, 'on');
+    assert.equal(deploy.visibilitySource, undefined);
   });
 });
 
@@ -955,6 +958,7 @@ test('mutators leave the disk untouched on a dry run and back up what they repla
     const mcp = await setMcpEnabled({
       server: 'approved',
       enabled: false,
+      origin: 'project',
       projectRoot: fixture.project,
       dryRun: true
     });

@@ -227,15 +227,23 @@ function describe(text: string): { description?: string } {
 
 export type ActionTarget = {
   projectRoot: string;
+  /** The stable id a scan hands back on every row. Takes priority over name matching. */
+  id?: string;
   client?: Client;
   scope?: ActionScope;
   dryRun?: boolean;
 };
 
 /** Where an action writes. The project root is always the server's cwd. */
-export function actionTarget(opts: { client?: Client; scope?: ActionScope; dryRun?: boolean }): ActionTarget {
+export function actionTarget(opts: {
+  id?: string;
+  client?: Client;
+  scope?: ActionScope;
+  dryRun?: boolean;
+}): ActionTarget {
   return {
     projectRoot: process.cwd(),
+    ...(opts.id ? { id: opts.id } : {}),
     ...(opts.client ? { client: opts.client } : {}),
     ...(opts.scope ? { scope: opts.scope } : {}),
     ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {})

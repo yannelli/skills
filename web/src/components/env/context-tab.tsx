@@ -302,6 +302,17 @@ export function ContextTab({ resource, probe, onMeasure, onChanged }: ContextTab
                               ) : null}
                               {control.label}
                             </Button>
+                          ) : line.remedy ? (
+                            // A real lever exists, but it belongs to the client
+                            // or plugin manager, not to an API Yard can call —
+                            // shown as guidance text rather than a button that
+                            // would only fail on click.
+                            <span
+                              className="block max-w-[14rem] truncate text-xs text-muted-foreground"
+                              title={`${line.remedy} — Yard has no API for this; run it yourself`}
+                            >
+                              {line.remedy}
+                            </span>
                           ) : (
                             <span
                               className="text-xs text-muted-foreground"
@@ -371,19 +382,30 @@ function basisOf(line: ContextLine): Basis {
 }
 
 /**
- * Only offer a switch where the environment layer says one exists — a
- * plugin-owned or non-Claude skill carries no remedy, and guessing would write
- * to the wrong client's config.
+ * Only offer a button where `remedyActionable` says the action layer will
+ * actually carry out the write — `remedy` alone is not enough, since a
+ * plugin-owned skill or MCP server still gets a `remedy` string (the
+ * plugin's own enable/disable, for the reader's benefit) that Yard has no API
+ * for. Offering a button there would just fail on click, which is the exact
+ * "reports success, changes nothing" failure this layer exists to prevent —
+ * see `mcpRemedy`/`skillActionBlocked` in src/env/context.ts and
+ * src/env/actions.ts.
  */
 function controlFor(line: ContextLine): { label: string; run: () => Promise<ActionResult> } | undefined {
-  if (!line.remedy) {
+  if (!line.remedyActionable) {
     return undefined
   }
   if (line.kind === 'skill') {
-    return { label: 'turn off', run: () => setSkillVisibility(line.label, 'off', line.client) }
+    return {
+      label: 'turn off',
+      run: () => setSkillVisibility({ id: line.id, skill: line.label, visibility: 'off', client: line.client }),
+    }
   }
   if (line.kind === 'mcp') {
-    return { label: 'disable', run: () => setMcpEnabled(line.label, false, line.client) }
+    return {
+      label: 'disable',
+      run: () => setMcpEnabled({ id: line.id, server: line.label, enabled: false, client: line.client }),
+    }
   }
   return undefined
 }

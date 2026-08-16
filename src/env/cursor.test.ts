@@ -239,6 +239,104 @@ test('infers MCP transport from url and reads the disabled sibling key', async (
     const inline = servers.get('cursor:plugin:shadcn:shadcn');
     assert.equal(inline?.command, 'npx');
     assert.ok(inline?.file.endsWith(path.join('.cursor-plugin', 'plugin.json')));
+    // The probe needs this to resolve a relative command/cwd or plugin-root
+    // variable against the plugin's own directory, not Yard's process cwd.
+    assert.ok(inline?.pluginRoot?.endsWith(path.join('shadcn', 'sha256-abc')));
+  });
+});
+
+test('discovers plugin MCP servers from an external path, a sibling mcp.json, and a mixed array', async () => {
+  await withFixture(async ({ home, project }) => {
+    const cache = path.join(home, '.cursor', 'plugins', 'cache', 'cursor-public');
+
+    // Four of five real plugins point `mcpServers` at an external file — the
+    // pattern the plugin-template's own starters and the `figma` plugin use.
+    const figmaRoot = path.join(cache, 'figma', 'sha256-figma');
+    await writeJsonFile(path.join(figmaRoot, '.cursor-plugin', 'plugin.json'), {
+      name: 'figma',
+      mcpServers: './mcp.json'
+    });
+    await writeJsonFile(path.join(figmaRoot, 'mcp.json'), {
+      mcpServers: { figma: { url: 'https://mcp.figma.com/mcp' } }
+    });
+
+    // The fifth (Linear, per the root-cause report) declares nothing at all —
+    // Cursor auto-discovers the sibling `mcp.json` at the plugin root.
+    const linearRoot = path.join(cache, 'linear', 'sha256-linear');
+    await writeJsonFile(path.join(linearRoot, '.cursor-plugin', 'plugin.json'), { name: 'linear' });
+    await writeJsonFile(path.join(linearRoot, 'mcp.json'), {
+      mcpServers: { linear: { url: 'https://mcp.linear.app/mcp' } }
+    });
+
+    // A manifest may also mix an external path with an inline server in one array.
+    const mixedRoot = path.join(cache, 'mixed', 'sha256-mixed');
+    await writeJsonFile(path.join(mixedRoot, '.cursor-plugin', 'plugin.json'), {
+      name: 'mixed',
+      mcpServers: ['./extra.json', { inline: { command: 'inline-server' } }]
+    });
+    await writeJsonFile(path.join(mixedRoot, 'extra.json'), {
+      mcpServers: { extra: { command: 'extra-server' } }
+    });
+
+    const scan = await scanCursor(project);
+    const servers = new Map(scan.mcpServers.map((entry) => [entry.id, entry]));
+
+    const figma = servers.get('cursor:plugin:figma:figma');
+    assert.equal(figma?.url, 'https://mcp.figma.com/mcp');
+    assert.equal(figma?.scope, 'plugin');
+    assert.ok(figma?.file.endsWith(path.join('figma', 'sha256-figma', 'mcp.json')));
+    assert.ok(figma?.pluginRoot?.endsWith(path.join('figma', 'sha256-figma')));
+
+    const linear = servers.get('cursor:plugin:linear:linear');
+    assert.equal(linear?.url, 'https://mcp.linear.app/mcp');
+    assert.ok(linear?.file.endsWith(path.join('linear', 'sha256-linear', 'mcp.json')));
+
+    assert.equal(servers.get('cursor:plugin:mixed:extra')?.command, 'extra-server');
+    assert.equal(servers.get('cursor:plugin:mixed:inline')?.command, 'inline-server');
+
+    const linearPlugin = scan.plugins.find((entry) => entry.name === 'linear');
+    // The sole point of this fix: none of these three used to count any MCP
+    // contribution at all, which is what made them read as `plugin-empty`.
+    assert.equal(linearPlugin?.mcpServers, 1);
+    assert.equal(scan.plugins.find((entry) => entry.name === 'figma')?.mcpServers, 1);
+    assert.equal(scan.plugins.find((entry) => entry.name === 'mixed')?.mcpServers, 2);
+  });
+});
+
+test('an external mcpServers reference cannot escape the plugin root, and a missing one warns', async () => {
+  await withFixture(async ({ home, project }) => {
+    const cache = path.join(home, '.cursor', 'plugins', 'cache', 'cursor-public');
+
+    const rogueRoot = path.join(cache, 'rogue', 'sha256-rogue');
+    await writeJsonFile(path.join(rogueRoot, '.cursor-plugin', 'plugin.json'), {
+      name: 'rogue',
+      mcpServers: '/etc/hosts'
+    });
+
+    const brokenRoot = path.join(cache, 'broken', 'sha256-broken');
+    await writeJsonFile(path.join(brokenRoot, '.cursor-plugin', 'plugin.json'), {
+      name: 'broken',
+      mcpServers: './missing.json'
+    });
+
+    const scan = await scanCursor(project);
+
+    assert.equal(scan.plugins.find((entry) => entry.name === 'rogue')?.mcpServers, 0);
+    assert.ok(
+      scan.warnings.some(
+        (warning) =>
+          warning.message === 'mcpServers path "/etc/hosts" points outside the plugin directory'
+      )
+    );
+
+    assert.equal(scan.plugins.find((entry) => entry.name === 'broken')?.mcpServers, 0);
+    assert.ok(
+      scan.warnings.some(
+        (warning) =>
+          warning.file.endsWith(path.join('broken', 'sha256-broken', 'missing.json')) &&
+          warning.message === 'referenced by the plugin manifest but missing'
+      )
+    );
   });
 });
 
@@ -266,6 +364,7 @@ test('parses flat user hooks and Claude-shaped plugin hooks', async () => {
     assert.equal(pluginHook?.plugin, 'shadcn');
     assert.equal(pluginHook?.matcher, 'startup|resume|clear|compact');
     assert.equal(pluginHook?.command, 'node "${CLAUDE_PLUGIN_ROOT}/hooks/x.mjs"');
+    assert.ok(pluginHook?.pluginRoot?.endsWith(path.join('shadcn', 'sha256-abc')));
 
     // An unrecognised event is reported but still surfaced.
     assert.ok(scan.hooks.some((hook) => hook.event === 'notAnEvent'));
